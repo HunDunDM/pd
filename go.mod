@@ -69,4 +69,4 @@ require (
 	honnef.co/go/tools v0.0.1-2020.1.3
 )
 
-replace github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200407064406-b2b8ad403d01 => github.com/hundundm/tidb-dashboard v0.0.0-20200407120825-70ee4e160a57
+replace github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200407064406-b2b8ad403d01 => github.com/hundundm/tidb-dashboard v0.0.0-20200409100604-4f53605d56a4
