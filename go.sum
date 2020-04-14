@@ -172,8 +172,8 @@ github.com/gtank/cryptopasta v0.0.0-20170601214702-1f550f6f2f69 h1:7xsUJsB2Nrdct
 github.com/gtank/cryptopasta v0.0.0-20170601214702-1f550f6f2f69/go.mod h1:YLEMZOtU+AZ7dhN9T/IpGhXVGly2bvkJQ+zxj3WeVQo=
 github.com/hpcloud/tail v1.0.0 h1:nfCOvKYfkgYP8hkirhJocXT2+zOD8yUNjXaWfTlyFKI=
 github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpOxQnU=
-github.com/hundundm/tidb-dashboard v0.0.0-20200409100604-4f53605d56a4 h1:91yRMrLMhrRys7kdZk6bmeCJfH77IqP4c7mQxlDHvX0=
-github.com/hundundm/tidb-dashboard v0.0.0-20200409100604-4f53605d56a4/go.mod h1:77fCh8d3oKzC5ceOJWeZXAS/mLzVgdZ7rKniwmOyFuo=
+github.com/hundundm/tidb-dashboard v0.0.0-20200414005740-184b77a6fb0a h1:e4OFFOjGeTpHhAOZr3IDejtipZbb6fZ4zLJ0AyeR3SU=
+github.com/hundundm/tidb-dashboard v0.0.0-20200414005740-184b77a6fb0a/go.mod h1:77fCh8d3oKzC5ceOJWeZXAS/mLzVgdZ7rKniwmOyFuo=
 github.com/inconshreveable/mousetrap v1.0.0 h1:Z8tu5sraLXCXIcARxBp/8cbvlwVa7Z1NHg9XEKhtSvM=
 github.com/inconshreveable/mousetrap v1.0.0/go.mod h1:PxqpIevigyE2G7u3NXJIT2ANytuPF1OarO4DADm73n8=
 github.com/jinzhu/gorm v1.9.12 h1:Drgk1clyWT9t9ERbzHza6Mj/8FY/CqMyVzOiHviMo6Q=
