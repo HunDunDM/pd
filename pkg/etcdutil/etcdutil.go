@@ -26,6 +26,7 @@ import (
 	"go.etcd.io/etcd/etcdserver"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -40,6 +41,24 @@ const (
 	// longer then 1s, they are considered as slow requests.
 	DefaultSlowRequestTime = 1 * time.Second
 )
+
+var (
+	// DefaultLogConfig is the default LogConfig of etcd client.
+	DefaultLogConfig zap.Config
+)
+
+func init() {
+	name := "pd-etcd-client"
+	_ = zap.RegisterEncoder(name, func(zapcore.EncoderConfig) (zapcore.Encoder, error) {
+		logCfg := &log.Config{
+			DisableTimestamp:    false,
+			DisableErrorVerbose: false,
+		}
+		return log.NewTextEncoder(logCfg), nil
+	})
+	DefaultLogConfig = zap.NewProductionConfig()
+	DefaultLogConfig.Encoding = name
+}
 
 // CheckClusterID checks Etcd's cluster ID, returns an error if mismatch.
 // This function will never block even quorum is not satisfied.

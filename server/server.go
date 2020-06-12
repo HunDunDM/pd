@@ -284,9 +284,14 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", s.cfg.Security))
 
 	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: etcdTimeout,
-		TLS:         tlsConfig,
+		Endpoints:            endpoints,
+		DialTimeout:          etcdTimeout,
+		DialKeepAliveTime:    grpcutil.DefaultKeepaliveClientParams.Time,
+		DialKeepAliveTimeout: grpcutil.DefaultKeepaliveClientParams.Timeout,
+		PermitWithoutStream:  grpcutil.DefaultKeepaliveClientParams.PermitWithoutStream,
+		DialOptions:          []grpc.DialOption{grpc.WithConnectParams(grpcutil.DefaultConnectParams)},
+		TLS:                  tlsConfig,
+		LogConfig:            &etcdutil.DefaultLogConfig,
 	})
 	if err != nil {
 		return errors.WithStack(err)
