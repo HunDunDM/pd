@@ -103,7 +103,7 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	defer cancel()
 
 	start := time.Now()
-	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
+	resp, err := c.Get(ctx, key, opts...)
 	if err != nil {
 		log.Error("load from etcd meet error", zap.Error(err))
 	}

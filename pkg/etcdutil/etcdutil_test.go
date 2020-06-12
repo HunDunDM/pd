@@ -158,9 +158,8 @@ func (s *testEtcdutilSuite) TestEtcdKVGet(c *C) {
 	keys := []string{"test/key1", "test/key2", "test/key3", "test/key4", "test/key5"}
 	vals := []string{"val1", "val2", "val3", "val4", "val5"}
 
-	kv := clientv3.NewKV(client)
 	for i := range keys {
-		_, err = kv.Put(context.TODO(), keys[i], vals[i])
+		_, err = client.Put(context.TODO(), keys[i], vals[i])
 		c.Assert(err, IsNil)
 	}
 
