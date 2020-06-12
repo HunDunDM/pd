@@ -17,11 +17,33 @@ import (
 	"context"
 	"crypto/tls"
 	"net/url"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/pkg/transport"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
+)
+
+var (
+	// DefaultConnectParams is the default connect parameters of gRPC client.
+	DefaultConnectParams = grpc.ConnectParams{
+		Backoff: backoff.Config{
+			BaseDelay:  time.Second,     // Default
+			Multiplier: 1.6,             // Default
+			Jitter:     0.2,             // Default
+			MaxDelay:   3 * time.Second, // Default was 120 seconds
+		},
+		MinConnectTimeout: 5 * time.Second, // Default was 20 seconds
+	}
+	// DefaultKeepaliveClientParams is the default keepalive parameters of gRPC client.
+	DefaultKeepaliveClientParams = keepalive.ClientParameters{
+		Time:                10 * time.Second,
+		Timeout:             3 * time.Second,
+		PermitWithoutStream: false,
+	}
 )
 
 // SecurityConfig is the configuration for supporting tls.

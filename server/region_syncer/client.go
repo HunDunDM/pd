@@ -24,15 +24,8 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
-)
-
-const (
-	keepaliveTime    = 10 * time.Second
-	keepaliveTimeout = 3 * time.Second
 )
 
 // StopSyncWithLeader stop to sync the region with leader.
@@ -69,20 +62,8 @@ func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 		addr,
 		tlsCfg,
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize)),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                keepaliveTime,
-			Timeout:             keepaliveTimeout,
-			PermitWithoutStream: true,
-		}),
-		grpc.WithConnectParams(grpc.ConnectParams{
-			Backoff: backoff.Config{
-				BaseDelay:  time.Second,     // Default was 1s.
-				Multiplier: 1.6,             // Default
-				Jitter:     0.2,             // Default
-				MaxDelay:   3 * time.Second, // Default was 120s.
-			},
-			MinConnectTimeout: 5 * time.Second,
-		}),
+		grpc.WithKeepaliveParams(grpcutil.DefaultKeepaliveClientParams),
+		grpc.WithConnectParams(grpcutil.DefaultConnectParams),
 		// WithBlock will block the dial step until success or cancel the context.
 		grpc.WithBlock(),
 	)
