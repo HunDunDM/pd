@@ -206,21 +206,12 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, typ string) (ret
 					zap.Float64("bytes-mf", newItem.RollingByteRate.mf.Get()),
 					zap.Uint64("bytes-mf-count", bytesMFCount),
 					zap.Float64("bytes-mf-last", bytesMFLast),
+					zap.Int("hot-degree", newItem.HotDegree),
+					zap.Int("anti-count", newItem.AntiCount),
 				)
 			}
 		}
 	}
-
-	log.Info("region heartbeat interval",
-		zap.Uint64("interval", interval),
-		zap.Uint64("region", region.GetID()),
-		zap.Uint64("store", region.GetLeader().StoreId),
-		zap.Uint64("epoch", region.GetRegionEpoch().Version),
-		zap.Float64("byteRate", bytes),
-		zap.Float64("keyRate", keys),
-		zap.Int("hotdegree", hotdegree),
-		zap.Int("hotRegionAntiCount", hotRegionAntiCount),
-		zap.String("type", f.kind.String()))
 
 	return ret
 }
