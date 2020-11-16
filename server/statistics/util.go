@@ -82,3 +82,9 @@ func (r *MedianFilter) Set(n float64) {
 	r.records[0] = n
 	r.count = 1
 }
+
+func (r *MedianFilter) Last() (count uint64, value float64) {
+	count = r.count
+	value = r.records[(count+r.size-1)%r.size]
+	return
+}

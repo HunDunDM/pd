@@ -687,6 +687,16 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 	c.Unlock()
 
+	if len(writeItems)+len(readItems) > 0 {
+		log.Info("hotspot-stats-debug-1",
+			zap.Uint64("id", region.GetID()),
+			zap.Uint64("write-keys", region.GetKeysWritten()),
+			zap.Uint64("write-bytes", region.GetBytesWritten()),
+			zap.Uint64("read-keys", region.GetKeysRead()),
+			zap.Uint64("read-bytes", region.GetBytesRead()),
+		)
+	}
+
 	// If there are concurrent heartbeats from the same region, the last write will win even if
 	// writes to storage in the critical area. So don't use mutex to protect it.
 	if saveKV && c.storage != nil {

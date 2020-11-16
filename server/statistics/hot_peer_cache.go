@@ -181,6 +181,33 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, typ string) (ret
 			ret = append(ret, newItem)
 			hotdegree = newItem.HotDegree
 			hotRegionAntiCount = newItem.AntiCount
+
+			if newItem.needDelete {
+				log.Info("hotspot-stats-debug-2",
+					zap.Uint64("id", newItem.RegionID),
+					zap.Uint64("store", newItem.StoreID),
+					zap.Bool("need-delete", true),
+				)
+			} else {
+				keysMFCount, keysMFLast := newItem.RollingKeyRate.mf.Last()
+				bytesMFCount, bytesMFLast := newItem.RollingByteRate.mf.Last()
+				log.Info("hotspot-stats-debug-2",
+					zap.Uint64("id", newItem.RegionID),
+					zap.Uint64("store", newItem.StoreID),
+					zap.Bool("need-delete", false),
+					zap.String("kind", f.kind.String()),
+					zap.Float64("delta-keys", newItem.RollingKeyRate.aot.deltaSum),
+					zap.Duration("delta-keys-time", newItem.RollingKeyRate.aot.intervalSum),
+					zap.Float64("delta-bytes", newItem.RollingByteRate.aot.deltaSum),
+					zap.Duration("delta-bytes-time", newItem.RollingByteRate.aot.intervalSum),
+					zap.Float64("keys-mf", newItem.RollingKeyRate.mf.Get()),
+					zap.Uint64("keys-mf-count", keysMFCount),
+					zap.Float64("keys-mf-last", keysMFLast),
+					zap.Float64("bytes-mf", newItem.RollingByteRate.mf.Get()),
+					zap.Uint64("bytes-mf-count", bytesMFCount),
+					zap.Float64("bytes-mf-last", bytesMFLast),
+				)
+			}
 		}
 	}
 
