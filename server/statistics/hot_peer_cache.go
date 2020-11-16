@@ -132,7 +132,6 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, typ string) (ret
 	keyRate := keys / float64(interval)
 
 	f.collectRegionMetrics(byteRate, keyRate, interval)
-	hotdegree, hotRegionAntiCount := 0, 0
 
 	// old region is in the front and new region is in the back
 	// which ensures it will hit the cache if moving peer or transfer leader occurs with the same replica number
@@ -179,8 +178,6 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, typ string) (ret
 		newItem = f.updateHotPeerStat(newItem, oldItem, bytes, keys, time.Duration(interval), typ)
 		if newItem != nil {
 			ret = append(ret, newItem)
-			hotdegree = newItem.HotDegree
-			hotRegionAntiCount = newItem.AntiCount
 
 			if newItem.needDelete {
 				log.Info("hotspot-stats-debug-2",
