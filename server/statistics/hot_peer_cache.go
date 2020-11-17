@@ -191,6 +191,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, typ string) (ret
 				log.Info("hotspot-stats-debug-2",
 					zap.Uint64("id", newItem.RegionID),
 					zap.Uint64("store", newItem.StoreID),
+					zap.Bool("is-leader", newItem.isLeader),
 					zap.Bool("need-delete", false),
 					zap.String("kind", f.kind.String()),
 					zap.Float64("delta-keys", newItem.RollingKeyRate.aot.deltaSum),
