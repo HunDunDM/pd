@@ -514,7 +514,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 		log.Info("hotspot-stats-debug-3",
 			zap.Int("rand", s),
 			zap.String("kind", write.String()),
-			zap.String("type", movePeer.String()),
+			zap.String("type", transferLeader.String()),
 			zap.Int("op-len", len(ops)),
 		)
 		return ops
