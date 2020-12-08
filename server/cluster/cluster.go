@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/id"
+	plog "github.com/tikv/pd/server/pluggable_logger"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/replication"
 	"github.com/tikv/pd/server/schedule"
@@ -686,6 +687,16 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		c.hotSpotCache.Update(readItem)
 	}
 	c.Unlock()
+
+	if len(writeItems)+len(readItems) > 0 {
+		plog.HotRegion.Info("source-of-statistics",
+			zap.Uint64("region-id", region.GetID()),
+			zap.Uint64("write-keys", region.GetKeysWritten()),
+			zap.Uint64("write-bytes", region.GetBytesWritten()),
+			zap.Uint64("read-keys", region.GetKeysRead()),
+			zap.Uint64("read-bytes", region.GetBytesRead()),
+		)
+	}
 
 	// If there are concurrent heartbeats from the same region, the last write will win even if
 	// writes to storage in the critical area. So don't use mutex to protect it.

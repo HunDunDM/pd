@@ -20,6 +20,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/server/core"
+	plog "github.com/tikv/pd/server/pluggable_logger"
+	"go.uber.org/zap"
 )
 
 const (
@@ -176,6 +178,38 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 		newItem = f.updateHotPeerStat(newItem, oldItem, bytes, keys, time.Duration(interval))
 		if newItem != nil {
 			ret = append(ret, newItem)
+
+			if newItem.needDelete {
+				plog.HotRegion.Info("target-of-statistics",
+					zap.Uint64("region-id", newItem.RegionID),
+					zap.Uint64("store-id", newItem.StoreID),
+					zap.Bool("need-delete", true),
+				)
+			} else {
+				keysMF, keysMFLast, keysMFCount := newItem.rollingKeyRate.GetMedianFilterInfo()
+				bytesMF, bytesMFLast, bytesMFCount := newItem.rollingByteRate.GetMedianFilterInfo()
+				keysDeltaSum, keysIntervalSum := newItem.rollingKeyRate.GetAvgOverTimeInfo()
+				bytesDeltaSum, bytesIntervalSum := newItem.rollingByteRate.GetAvgOverTimeInfo()
+				plog.HotRegion.Info("target-of-statistics",
+					zap.Uint64("region-id", newItem.RegionID),
+					zap.Uint64("store-id", newItem.StoreID),
+					zap.Bool("is-leader", newItem.isLeader),
+					zap.Bool("need-delete", false),
+					zap.String("kind", f.kind.String()),
+					zap.Float64("delta-keys", keysDeltaSum),
+					zap.Duration("delta-keys-time", keysIntervalSum),
+					zap.Float64("delta-bytes", bytesDeltaSum),
+					zap.Duration("delta-bytes-time", bytesIntervalSum),
+					zap.Float64("keys-mf", keysMF),
+					zap.Uint64("keys-mf-count", keysMFCount),
+					zap.Float64("keys-mf-last", keysMFLast),
+					zap.Float64("bytes-mf", bytesMF),
+					zap.Uint64("bytes-mf-count", bytesMFCount),
+					zap.Float64("bytes-mf-last", bytesMFLast),
+					zap.Int("hot-degree", newItem.HotDegree),
+					zap.Int("anti-count", newItem.AntiCount),
+				)
+			}
 		}
 	}
 

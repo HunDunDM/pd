@@ -68,3 +68,15 @@ func (t *TimeMedian) GetFilledPeriod() int { // it is unrelated with mfSize
 func (t *TimeMedian) GetInstantaneous() float64 {
 	return t.instantaneous
 }
+
+// GetMedianFilterInfo outputs some debugging information of MedianFilter.
+func (t *TimeMedian) GetMedianFilterInfo() (value, last float64, count uint64) {
+	count = t.mf.count
+	size := t.mf.size
+	return t.mf.Get(), t.mf.records[(count+size-1)%size], count
+}
+
+// GetAvgOverTimeInfo outputs some debugging information of AvgOverTime.
+func (t *TimeMedian) GetAvgOverTimeInfo() (float64, time.Duration) {
+	return t.aot.deltaSum, t.aot.intervalSum
+}

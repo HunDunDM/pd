@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
+	plog "github.com/tikv/pd/server/pluggable_logger"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -402,12 +403,22 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 	leaderSolver := newBalanceSolver(h, cluster, read, transferLeader)
 	ops := leaderSolver.solve()
 	if len(ops) > 0 {
+		plog.HotRegion.Info("generate-scheduling",
+			zap.String("kind", read.String()),
+			zap.String("type", transferLeader.String()),
+			zap.Int("op-len", len(ops)),
+		)
 		return ops
 	}
 
 	peerSolver := newBalanceSolver(h, cluster, read, movePeer)
 	ops = peerSolver.solve()
 	if len(ops) > 0 {
+		plog.HotRegion.Info("generate-scheduling",
+			zap.String("kind", read.String()),
+			zap.String("type", movePeer.String()),
+			zap.Int("op-len", len(ops)),
+		)
 		return ops
 	}
 
@@ -423,6 +434,11 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 		peerSolver := newBalanceSolver(h, cluster, write, movePeer)
 		ops := peerSolver.solve()
 		if len(ops) > 0 {
+			plog.HotRegion.Info("generate-scheduling",
+				zap.String("kind", write.String()),
+				zap.String("type", movePeer.String()),
+				zap.Int("op-len", len(ops)),
+			)
 			return ops
 		}
 	default:
@@ -431,6 +447,11 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 	leaderSolver := newBalanceSolver(h, cluster, write, transferLeader)
 	ops := leaderSolver.solve()
 	if len(ops) > 0 {
+		plog.HotRegion.Info("generate-scheduling",
+			zap.String("kind", write.String()),
+			zap.String("type", transferLeader.String()),
+			zap.Int("op-len", len(ops)),
+		)
 		return ops
 	}
 
@@ -564,9 +585,51 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	for i := 0; i < len(ops); i++ {
 		// TODO: multiple operators need to be atomic.
 		if !bs.sche.addPendingInfluence(ops[i], best.srcStoreID, best.dstStoreID, infls[i], bs.rwTy, bs.opTy) {
+			log.Info("scheduling-reason",
+				zap.Bool("cancel", true),
+				zap.Uint64("from", best.srcStoreID),
+				zap.Uint64("to", best.dstStoreID),
+				zap.Int64("rank", best.progressiveRank),
+				zap.Uint64("region-id", best.region.GetID()),
+				zap.Float64("bytes", best.srcPeerStat.ByteRate),
+				zap.Float64("keys", best.srcPeerStat.KeyRate),
+			)
 			return nil
 		}
 	}
+
+	if len(ops) > 0 {
+		fromLoad := bs.stLoadDetail[best.srcStoreID].LoadPred
+		toLoad := bs.stLoadDetail[best.dstStoreID].LoadPred
+		log.Info("scheduling-reason",
+			zap.Bool("cancel", false),
+			zap.Uint64("from", best.srcStoreID),
+			zap.Uint64("to", best.dstStoreID),
+			zap.Int64("rank", best.progressiveRank),
+			zap.Uint64("id", best.region.GetID()),
+			zap.Float64("bytes", best.srcPeerStat.GetByteRate()),
+			zap.Float64("keys", best.srcPeerStat.GetKeyRate()),
+			zap.Float64("from_keys", fromLoad.Current.KeyRate),
+			zap.Float64("from_bytes", fromLoad.Current.ByteRate),
+			zap.Float64("from_count", fromLoad.Current.Count),
+			zap.Float64("from_future_keys", fromLoad.Future.KeyRate),
+			zap.Float64("from_future_bytes", fromLoad.Future.ByteRate),
+			zap.Float64("from_future_count", fromLoad.Future.Count),
+			zap.Float64("from_exp_keys", fromLoad.Expect.KeyRate),
+			zap.Float64("from_exp_bytes", fromLoad.Expect.ByteRate),
+			zap.Float64("from_exp_count", fromLoad.Expect.Count),
+			zap.Float64("to_keys", toLoad.Current.KeyRate),
+			zap.Float64("to_bytes", toLoad.Current.ByteRate),
+			zap.Float64("to_count", toLoad.Current.Count),
+			zap.Float64("to_future_keys", toLoad.Future.KeyRate),
+			zap.Float64("to_future_bytes", toLoad.Future.ByteRate),
+			zap.Float64("to_future_count", toLoad.Future.Count),
+			zap.Float64("to_exp_keys", toLoad.Expect.KeyRate),
+			zap.Float64("to_exp_bytes", toLoad.Expect.ByteRate),
+			zap.Float64("to_exp_count", toLoad.Expect.Count),
+		)
+	}
+
 	return ops
 }
 
