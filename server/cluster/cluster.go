@@ -289,7 +289,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		zap.Duration("cost", time.Since(start)),
 	)
 	for _, store := range c.GetStores() {
-		c.storesStats.GetOrCreateRollingStoreStats(store.GetID())
+		c.storesStats.CreateRollingStoreStats(store.GetID())
 	}
 	return c, nil
 }
@@ -1125,7 +1125,7 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 		}
 	}
 	c.core.PutStore(store)
-	c.storesStats.GetOrCreateRollingStoreStats(store.GetID())
+	c.storesStats.CreateRollingStoreStats(store.GetID())
 	return nil
 }
 
