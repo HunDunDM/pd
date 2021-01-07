@@ -79,6 +79,11 @@ func SetStoreState(state metapb.StoreState) StoreCreateOption {
 		meta := proto.Clone(store.meta).(*metapb.Store)
 		meta.State = state
 		store.meta = meta
+		if state == metapb.StoreState_Offline {
+			store.offlineCount = store.regionCount
+		} else {
+			store.offlineCount = 0
+		}
 	}
 }
 

@@ -40,6 +40,7 @@ type StoreInfo struct {
 	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
 	leaderCount         int
 	regionCount         int
+	offlineCount        int
 	leaderSize          int64
 	regionSize          int64
 	pendingPeerCount    int
@@ -65,26 +66,12 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
-	meta := proto.Clone(s.meta).(*metapb.Store)
-	store := &StoreInfo{
-		meta:                meta,
-		storeStats:          s.storeStats,
-		pauseLeaderTransfer: s.pauseLeaderTransfer,
-		leaderCount:         s.leaderCount,
-		regionCount:         s.regionCount,
-		leaderSize:          s.leaderSize,
-		regionSize:          s.regionSize,
-		pendingPeerCount:    s.pendingPeerCount,
-		lastPersistTime:     s.lastPersistTime,
-		leaderWeight:        s.leaderWeight,
-		regionWeight:        s.regionWeight,
-		available:           s.available,
-	}
-
+	store := *s
+	store.meta = proto.Clone(s.meta).(*metapb.Store)
 	for _, opt := range opts {
-		opt(store)
+		opt(&store)
 	}
-	return store
+	return &store
 }
 
 // ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
@@ -232,6 +219,19 @@ func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
 	default:
 		return 0
 	}
+}
+
+// OfflineScore returns the current offline progress of the store.
+func (s *StoreInfo) OfflineScore() float64 {
+	if s.meta.State == metapb.StoreState_Offline && s.offlineCount > 0 {
+		offlineCount := s.offlineCount
+		regionCount := s.regionCount
+		if regionCount > offlineCount {
+			regionCount = offlineCount
+		}
+		return float64(offlineCount-regionCount) / float64(offlineCount)
+	}
+	return 0
 }
 
 // RegionScore returns the store's region score.
