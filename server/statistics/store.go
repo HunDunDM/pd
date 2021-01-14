@@ -99,7 +99,7 @@ func (s *StoresStats) UpdateTotalLoad(stores []*core.StoreInfo) {
 }
 
 // GetStoresLoads returns all stores loads.
-func (s *StoresStats) GetStoresLoads() map[uint64][]float64 {
+func (s *StoresStats) getStoresLoads() map[uint64][]float64 {
 	s.RLock()
 	defer s.RUnlock()
 	res := make(map[uint64][]float64, len(s.rollingStoresStats))

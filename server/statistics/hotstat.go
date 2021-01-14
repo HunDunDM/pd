@@ -26,3 +26,27 @@ func NewHotStat() *HotStat {
 		StoresStats: NewStoresStats(),
 	}
 }
+
+// GetStoresLoads returns all stores loads for scheduling.
+// It specially handles `StoreSum*` by summarying region peer stats.
+func (s *HotStat) GetStoresLoads() map[uint64][]float64 {
+	ret := s.StoresStats.getStoresLoads()
+	// To get close to the true store total value, hotDegree filter is not used here.
+	peers := s.HotCache.RegionStats(WriteFlow, 0)
+	for id := range ret {
+		var sumLeaderBytes, sumLeaderKeys, sumPeerBytes, sumPeerKeys float64
+		for _, peer := range peers[id] {
+			sumPeerBytes += peer.ByteRate
+			sumPeerKeys += peer.KeyRate
+			if peer.isLeader {
+				sumLeaderBytes += peer.ByteRate
+				sumLeaderKeys += peer.KeyRate
+			}
+		}
+		ret[id][StoreSumLeaderWriteBytes] = sumLeaderBytes
+		ret[id][StoreSumLeaderWriteKeys] = sumLeaderKeys
+		ret[id][StoreSumPeerWriteBytes] = sumPeerBytes
+		ret[id][StoreSumPeerWriteKeys] = sumPeerKeys
+	}
+	return ret
+}

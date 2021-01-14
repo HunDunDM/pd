@@ -26,6 +26,11 @@ const (
 	StoreDiskReadRate
 	StoreDiskWriteRate
 
+	StoreSumLeaderWriteBytes
+	StoreSumLeaderWriteKeys
+	StoreSumPeerWriteBytes
+	StoreSumPeerWriteKeys
+
 	StoreStatCount
 )
 
@@ -45,6 +50,14 @@ func (k StoreStatKind) String() string {
 		return "store_disk_read_rate"
 	case StoreDiskWriteRate:
 		return "store_disk_write_rate"
+	case StoreSumLeaderWriteBytes:
+		return "store_sum_leader_write_bytes"
+	case StoreSumLeaderWriteKeys:
+		return "store_sum_leader_write_keys"
+	case StoreSumPeerWriteBytes:
+		return "store_sum_peer_write_bytes"
+	case StoreSumPeerWriteKeys:
+		return "store_sum_peer_write_keys"
 	}
 
 	return "unknown StoreStatKind"

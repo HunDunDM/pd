@@ -279,34 +279,24 @@ func summaryStoresLoad(
 			byteRate, keyRate = loads[statistics.StoreWriteBytes], loads[statistics.StoreWriteKeys]
 		}
 
-		// Find all hot peers first
-		var hotPeers []*statistics.HotPeerStat
-		{
-			byteSum := 0.0
-			keySum := 0.0
-			for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
-				byteSum += peer.GetByteRate()
-				keySum += peer.GetKeyRate()
-				hotPeers = append(hotPeers, peer.Clone())
-			}
-			// Use sum of hot peers to estimate leader-only byte rate.
-			// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time, while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
-			// But none of the current dimension reflect this difference, so we create a new dimension to reflect it.
-			if kind == core.LeaderKind && rwTy == write {
-				byteRate = byteSum
-				keyRate = keySum
-			}
-
-			// Metric for debug.
-			{
-				ty := "byte-rate-" + rwTy.String() + "-" + kind.String()
-				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(byteSum)
-			}
-			{
-				ty := "key-rate-" + rwTy.String() + "-" + kind.String()
-				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(keySum)
-			}
+		// Use sum of hot peers to estimate leader-only byte rate.
+		// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time, while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
+		// But none of the current dimension reflect this difference, so we create a new dimension to reflect it.
+		if kind == core.LeaderKind && rwTy == write {
+			byteRate = loads[statistics.StoreSumLeaderWriteBytes]
+			keyRate = loads[statistics.StoreSumLeaderWriteKeys]
 		}
+
+		// Close all hot peers first
+		var hotPeers []*statistics.HotPeerStat
+		for _, peer := range storeHotPeers[id] {
+			hotPeers = append(hotPeers, peer.Clone())
+		}
+
+		// Metric for debug.
+		hotPeerSummary.WithLabelValues("byte-rate-"+rwTy.String()+"-"+kind.String(), fmt.Sprintf("%v", id)).Set(byteRate)
+		hotPeerSummary.WithLabelValues("key-rate-"+rwTy.String()+"-"+kind.String(), fmt.Sprintf("%v", id)).Set(keyRate)
+
 		allByteSum += byteRate
 		allKeySum += keyRate
 		allCount += float64(len(hotPeers))
@@ -349,21 +339,6 @@ func summaryStoresLoad(
 		}
 	}
 	return loadDetail
-}
-
-// filterHotPeers filter the peer whose hot degree is less than minHotDegress
-func filterHotPeers(
-	kind core.ResourceKind,
-	peers []*statistics.HotPeerStat,
-) []*statistics.HotPeerStat {
-	var ret []*statistics.HotPeerStat
-	for _, peer := range peers {
-		if kind == core.LeaderKind && !peer.IsLeader() {
-			continue
-		}
-		ret = append(ret, peer)
-	}
-	return ret
 }
 
 func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, rwTy rwType, opTy opType) bool {
