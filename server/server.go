@@ -143,6 +143,8 @@ type Server struct {
 
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
+
+	hasFollowed int64
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -1165,6 +1167,7 @@ func (s *Server) leaderLoop() {
 			}
 			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
 			// WatchLeader will keep looping and never return unless the PD leader has changed.
+			atomic.StoreInt64(&s.hasFollowed, 1)
 			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
 			syncer.StopSyncWithLeader()
 			log.Info("pd leader has changed, try to re-campaign a pd leader")
@@ -1186,6 +1189,15 @@ func (s *Server) leaderLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign pd leader", zap.String("campaign-pd-leader-name", s.Name()))
+	if atomic.LoadInt64(&s.hasFollowed) == 1 {
+		log.Error("test PD no leader, sleep 5min")
+		select {
+		case <-s.serverLoopCtx.Done():
+			return
+		case <-time.After(5 * time.Minute):
+		}
+	}
+
 	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign pd leader meets error due to txn conflict, another PD server may campaign successfully",
