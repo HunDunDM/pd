@@ -438,9 +438,15 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
 type regionMap struct {
-	m         map[uint64]*RegionInfo
+	m map[uint64]*RegionInfo
+
 	totalSize int64
 	totalKeys int64
+
+	totalReadBytes    uint64
+	totalReadKeys     uint64
+	totalWrittenBytes uint64
+	totalWrittenKeys  uint64
 }
 
 func newRegionMap() *regionMap {
@@ -467,13 +473,23 @@ func (rm *regionMap) Get(id uint64) *RegionInfo {
 }
 
 func (rm *regionMap) Put(region *RegionInfo) {
+	rm.totalSize += region.approximateSize
+	rm.totalKeys += region.approximateKeys
+	rm.totalReadBytes += region.readBytes
+	rm.totalReadKeys += region.readKeys
+	rm.totalWrittenBytes += region.writtenBytes
+	rm.totalWrittenKeys += region.writtenKeys
+
 	if old, ok := rm.m[region.GetID()]; ok {
 		rm.totalSize -= old.approximateSize
 		rm.totalKeys -= old.approximateKeys
+		rm.totalReadBytes -= old.readBytes
+		rm.totalReadKeys -= old.readKeys
+		rm.totalWrittenBytes -= old.writtenBytes
+		rm.totalWrittenKeys -= old.writtenKeys
 	}
+
 	rm.m[region.GetID()] = region
-	rm.totalSize += region.approximateSize
-	rm.totalKeys += region.approximateKeys
 }
 
 func (rm *regionMap) Delete(id uint64) {
@@ -484,6 +500,10 @@ func (rm *regionMap) Delete(id uint64) {
 		delete(rm.m, id)
 		rm.totalSize -= old.approximateSize
 		rm.totalKeys -= old.approximateKeys
+		rm.totalReadBytes -= old.readBytes
+		rm.totalReadKeys -= old.readKeys
+		rm.totalWrittenBytes -= old.writtenBytes
+		rm.totalWrittenKeys -= old.writtenKeys
 	}
 }
 
@@ -494,17 +514,43 @@ func (rm *regionMap) TotalSize() int64 {
 	return rm.totalSize
 }
 
+func (rm *regionMap) TotalKeys() int64 {
+	if rm.Len() == 0 {
+		return 0
+	}
+	return rm.totalKeys
+}
+
+func (rm *regionMap) TotalReadFlow() (keys, bytes uint64) {
+	if rm.Len() == 0 {
+		return 0, 0
+	}
+	return rm.totalReadKeys, rm.totalReadBytes
+}
+
+func (rm *regionMap) TotalWrittenFlow() (keys, bytes uint64) {
+	if rm.Len() == 0 {
+		return 0, 0
+	}
+	return rm.totalWrittenKeys, rm.totalWrittenBytes
+}
+
 // regionSubTree is used to manager different types of regions.
 type regionSubTree struct {
 	*regionTree
+
 	totalSize int64
 	totalKeys int64
+
+	totalReadBytes    uint64
+	totalReadKeys     uint64
+	totalWrittenBytes uint64
+	totalWrittenKeys  uint64
 }
 
 func newRegionSubTree() *regionSubTree {
 	return &regionSubTree{
 		regionTree: newRegionTree(),
-		totalSize:  0,
 	}
 }
 
@@ -513,6 +559,27 @@ func (rst *regionSubTree) TotalSize() int64 {
 		return 0
 	}
 	return rst.totalSize
+}
+
+func (rst *regionSubTree) TotalKeys() int64 {
+	if rst.length() == 0 {
+		return 0
+	}
+	return rst.totalKeys
+}
+
+func (rst *regionSubTree) TotalReadFlow() (keys, bytes uint64) {
+	if rst.length() == 0 {
+		return 0, 0
+	}
+	return rst.totalReadKeys, rst.totalReadBytes
+}
+
+func (rst *regionSubTree) TotalWrittenFlow() (keys, bytes uint64) {
+	if rst.length() == 0 {
+		return 0, 0
+	}
+	return rst.totalWrittenKeys, rst.totalWrittenBytes
 }
 
 func (rst *regionSubTree) scanRanges() []*RegionInfo {
@@ -529,21 +596,35 @@ func (rst *regionSubTree) scanRanges() []*RegionInfo {
 
 func (rst *regionSubTree) update(region *RegionInfo) {
 	overlaps := rst.regionTree.update(region)
+
 	rst.totalSize += region.approximateSize
 	rst.totalKeys += region.approximateKeys
-	for _, r := range overlaps {
-		rst.totalSize -= r.approximateSize
-		rst.totalKeys -= r.approximateKeys
+	rst.totalReadBytes += region.readBytes
+	rst.totalReadKeys += region.readKeys
+	rst.totalWrittenBytes += region.writtenBytes
+	rst.totalWrittenKeys += region.writtenKeys
+
+	for _, old := range overlaps {
+		rst.totalSize -= old.approximateSize
+		rst.totalKeys -= old.approximateKeys
+		rst.totalReadBytes -= old.readBytes
+		rst.totalReadKeys -= old.readKeys
+		rst.totalWrittenBytes -= old.writtenBytes
+		rst.totalWrittenKeys -= old.writtenKeys
 	}
 }
 
-func (rst *regionSubTree) remove(region *RegionInfo) {
+func (rst *regionSubTree) remove(old *RegionInfo) {
 	if rst.length() == 0 {
 		return
 	}
-	if rst.regionTree.remove(region) != nil {
-		rst.totalSize -= region.approximateSize
-		rst.totalKeys -= region.approximateKeys
+	if rst.regionTree.remove(old) != nil {
+		rst.totalSize -= old.approximateSize
+		rst.totalKeys -= old.approximateKeys
+		rst.totalReadBytes -= old.readBytes
+		rst.totalReadKeys -= old.readKeys
+		rst.totalWrittenBytes -= old.writtenBytes
+		rst.totalWrittenKeys -= old.writtenKeys
 	}
 }
 
@@ -865,6 +946,26 @@ func (r *RegionsInfo) GetStoreFollowerRegionSize(storeID uint64) int64 {
 // GetStoreLearnerRegionSize get total size of store's learner regions
 func (r *RegionsInfo) GetStoreLearnerRegionSize(storeID uint64) int64 {
 	return r.learners[storeID].TotalSize()
+}
+
+// GetStoreLeaderReadFlow get total read flow of store's leader regions
+func (r *RegionsInfo) GetStoreLeaderReadFlow(storeID uint64) (keys, bytes uint64) {
+	return r.leaders[storeID].TotalReadFlow()
+}
+
+// GetStoreLeaderWrittenFlow get total written flow of store's leader regions
+func (r *RegionsInfo) GetStoreLeaderWrittenFlow(storeID uint64) (keys, bytes uint64) {
+	return r.leaders[storeID].TotalWrittenFlow()
+}
+
+// GetStoreWrittenFlow get total written flow of store regions
+func (r *RegionsInfo) GetStoreWrittenFlow(storeID uint64) (keys, bytes uint64) {
+	for _, rst := range []map[uint64]*regionSubTree{r.leaders, r.followers, r.learners} {
+		subKeys, subBytes := rst[storeID].TotalWrittenFlow()
+		keys += subKeys
+		bytes += subBytes
+	}
+	return
 }
 
 // GetStoreRegionSize get total size of store's regions
