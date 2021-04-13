@@ -261,6 +261,20 @@ func (bc *BasicCluster) GetStoreRegionSize(storeID uint64) int64 {
 	return bc.Regions.GetStoreLeaderRegionSize(storeID) + bc.Regions.GetStoreFollowerRegionSize(storeID) + bc.Regions.GetStoreLearnerRegionSize(storeID)
 }
 
+// GetStoreReadFlow get total read flow of store's leader regions.
+func (bc *BasicCluster) GetStoreReadFlow(storeID uint64) (keys, bytes uint64) {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Regions.GetStoreLeaderReadFlow(storeID)
+}
+
+// GetStoreWrittenFlow get total written flow of store's regions.
+func (bc *BasicCluster) GetStoreWrittenFlow(storeID uint64) (keys, bytes uint64) {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Regions.GetStoreWrittenFlow(storeID)
+}
+
 // GetAverageRegionSize returns the average region approximate size.
 func (bc *BasicCluster) GetAverageRegionSize() int64 {
 	bc.RLock()

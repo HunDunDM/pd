@@ -507,6 +507,15 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	if store == nil {
 		return errors.Errorf("store %v not found", storeID)
 	}
+	if core.IsTiFlashStore(store.GetMeta()) {
+		// FIXME: demo code
+		readKeys, readBytes := c.core.GetStoreReadFlow(storeID)
+		writtenKeys, writtenBytes := c.core.GetStoreWrittenFlow(storeID)
+		stats.BytesRead = readBytes / 6
+		stats.KeysRead = readKeys / 6
+		stats.BytesWritten = writtenBytes / 6
+		stats.KeysWritten = writtenKeys / 6
+	}
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
 	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 		log.Warn("store does not have enough disk space",
