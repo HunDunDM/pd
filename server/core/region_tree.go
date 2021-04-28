@@ -48,16 +48,21 @@ const (
 )
 
 type regionTree struct {
-	tree *btree.BTree
+	tree      *btree.BTree
+	totalSize int64
 }
 
 func newRegionTree() *regionTree {
 	return &regionTree{
-		tree: btree.New(defaultBTreeDegree),
+		tree:      btree.New(defaultBTreeDegree),
+		totalSize: 0,
 	}
 }
 
 func (t *regionTree) length() int {
+	if t == nil {
+		return 0
+	}
 	return t.tree.Len()
 }
 
@@ -92,6 +97,8 @@ func (t *regionTree) getOverlaps(region *RegionInfo) []*RegionInfo {
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
 func (t *regionTree) update(region *RegionInfo) []*RegionInfo {
+	t.totalSize += region.approximateSize
+
 	overlaps := t.getOverlaps(region)
 	for _, item := range overlaps {
 		log.Debug("overlapping region",
@@ -99,10 +106,11 @@ func (t *regionTree) update(region *RegionInfo) []*RegionInfo {
 			logutil.ZapRedactStringer("delete-region", RegionToHexMeta(item.GetMeta())),
 			logutil.ZapRedactStringer("update-region", RegionToHexMeta(region.GetMeta())))
 		t.tree.Delete(&regionItem{item})
+
+		t.totalSize -= item.approximateSize
 	}
 
 	t.tree.ReplaceOrInsert(&regionItem{region: region})
-
 	return overlaps
 }
 
@@ -117,6 +125,8 @@ func (t *regionTree) remove(region *RegionInfo) btree.Item {
 	if result == nil || result.region.GetID() != region.GetID() {
 		return nil
 	}
+
+	t.totalSize -= region.approximateSize
 
 	return t.tree.Delete(result)
 }
@@ -178,6 +188,18 @@ func (t *regionTree) scanRange(startKey []byte, f func(*RegionInfo) bool) {
 	t.tree.AscendGreaterOrEqual(startItem, func(item btree.Item) bool {
 		return f(item.(*regionItem).region)
 	})
+}
+
+func (t *regionTree) scanRanges() []*RegionInfo {
+	if t.length() == 0 {
+		return nil
+	}
+	var res []*RegionInfo
+	t.scanRange([]byte(""), func(region *RegionInfo) bool {
+		res = append(res, region)
+		return true
+	})
+	return res
 }
 
 func (t *regionTree) getAdjacentRegions(region *RegionInfo) (*regionItem, *regionItem) {
@@ -244,6 +266,28 @@ func (t *regionTree) RandomRegion(ranges []KeyRange) *RegionInfo {
 	}
 
 	return nil
+}
+
+func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
+	if t.length() == 0 {
+		return nil
+	}
+
+	regions := make([]*RegionInfo, 0, n)
+
+	for i := 0; i < n; i++ {
+		if region := t.RandomRegion(ranges); region != nil {
+			regions = append(regions, region)
+		}
+	}
+	return regions
+}
+
+func (t *regionTree) TotalSize() int64 {
+	if t.length() == 0 {
+		return 0
+	}
+	return t.totalSize
 }
 
 func init() {

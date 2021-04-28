@@ -494,97 +494,14 @@ func (rm *regionMap) TotalSize() int64 {
 	return rm.totalSize
 }
 
-// regionSubTree is used to manager different types of regions.
-type regionSubTree struct {
-	*regionTree
-	totalSize int64
-	totalKeys int64
-}
-
-func newRegionSubTree() *regionSubTree {
-	return &regionSubTree{
-		regionTree: newRegionTree(),
-		totalSize:  0,
-	}
-}
-
-func (rst *regionSubTree) TotalSize() int64 {
-	if rst.length() == 0 {
-		return 0
-	}
-	return rst.totalSize
-}
-
-func (rst *regionSubTree) scanRanges() []*RegionInfo {
-	if rst.length() == 0 {
-		return nil
-	}
-	var res []*RegionInfo
-	rst.scanRange([]byte(""), func(region *RegionInfo) bool {
-		res = append(res, region)
-		return true
-	})
-	return res
-}
-
-func (rst *regionSubTree) update(region *RegionInfo) {
-	overlaps := rst.regionTree.update(region)
-	rst.totalSize += region.approximateSize
-	rst.totalKeys += region.approximateKeys
-	for _, r := range overlaps {
-		rst.totalSize -= r.approximateSize
-		rst.totalKeys -= r.approximateKeys
-	}
-}
-
-func (rst *regionSubTree) remove(region *RegionInfo) {
-	if rst.length() == 0 {
-		return
-	}
-	if rst.regionTree.remove(region) != nil {
-		rst.totalSize -= region.approximateSize
-		rst.totalKeys -= region.approximateKeys
-	}
-}
-
-func (rst *regionSubTree) length() int {
-	if rst == nil {
-		return 0
-	}
-	return rst.regionTree.length()
-}
-
-func (rst *regionSubTree) RandomRegion(ranges []KeyRange) *RegionInfo {
-	if rst.length() == 0 {
-		return nil
-	}
-
-	return rst.regionTree.RandomRegion(ranges)
-}
-
-func (rst *regionSubTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
-	if rst.length() == 0 {
-		return nil
-	}
-
-	regions := make([]*RegionInfo, 0, n)
-
-	for i := 0; i < n; i++ {
-		if region := rst.regionTree.RandomRegion(ranges); region != nil {
-			regions = append(regions, region)
-		}
-	}
-	return regions
-}
-
 // RegionsInfo for export
 type RegionsInfo struct {
 	tree         *regionTree
-	regions      *regionMap                // regionID -> regionInfo
-	leaders      map[uint64]*regionSubTree // storeID -> regionSubTree
-	followers    map[uint64]*regionSubTree // storeID -> regionSubTree
-	learners     map[uint64]*regionSubTree // storeID -> regionSubTree
-	pendingPeers map[uint64]*regionSubTree // storeID -> regionSubTree
+	regions      *regionMap             // regionID -> regionInfo
+	leaders      map[uint64]*regionTree // storeID -> regionSubTree
+	followers    map[uint64]*regionTree // storeID -> regionSubTree
+	learners     map[uint64]*regionTree // storeID -> regionSubTree
+	pendingPeers map[uint64]*regionTree // storeID -> regionSubTree
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
@@ -592,10 +509,10 @@ func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
 		tree:         newRegionTree(),
 		regions:      newRegionMap(),
-		leaders:      make(map[uint64]*regionSubTree),
-		followers:    make(map[uint64]*regionSubTree),
-		learners:     make(map[uint64]*regionSubTree),
-		pendingPeers: make(map[uint64]*regionSubTree),
+		leaders:      make(map[uint64]*regionTree),
+		followers:    make(map[uint64]*regionTree),
+		learners:     make(map[uint64]*regionTree),
+		pendingPeers: make(map[uint64]*regionTree),
 	}
 }
 
@@ -670,7 +587,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 			// Add leader peer to leaders.
 			store, ok := r.leaders[storeID]
 			if !ok {
-				store = newRegionSubTree()
+				store = newRegionTree()
 				r.leaders[storeID] = store
 			}
 			store.update(region)
@@ -678,7 +595,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 			// Add follower peer to followers.
 			store, ok := r.followers[storeID]
 			if !ok {
-				store = newRegionSubTree()
+				store = newRegionTree()
 				r.followers[storeID] = store
 			}
 			store.update(region)
@@ -690,7 +607,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 		storeID := peer.GetStoreId()
 		store, ok := r.learners[storeID]
 		if !ok {
-			store = newRegionSubTree()
+			store = newRegionTree()
 			r.learners[storeID] = store
 		}
 		store.update(region)
@@ -700,7 +617,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 		storeID := peer.GetStoreId()
 		store, ok := r.pendingPeers[storeID]
 		if !ok {
-			store = newRegionSubTree()
+			store = newRegionTree()
 			r.pendingPeers[storeID] = store
 		}
 		store.update(region)

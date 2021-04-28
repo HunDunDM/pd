@@ -293,7 +293,6 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	c.Assert(regions.tree.length(), Equals, 96)
 	c.Assert(len(regions.GetRegions()), Equals, 96)
 	c.Assert(regions.GetRegion(201), NotNil)
-	c.Assert(regions.regions.totalKeys, Equals, int64(20))
 	c.Assert(regions.regions.totalSize, Equals, int64(30))
 }
 
