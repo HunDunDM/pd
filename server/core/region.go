@@ -437,67 +437,39 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 }
 
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
-type regionMap struct {
-	m         map[uint64]*RegionInfo
-	totalSize int64
-	totalKeys int64
+type regionMap map[uint64]*regionItem
+
+func newRegionMap() regionMap {
+	return make(map[uint64]*regionItem)
 }
 
-func newRegionMap() *regionMap {
-	return &regionMap{
-		m: make(map[uint64]*RegionInfo),
-	}
+func (rm regionMap) Len() int {
+	return len(rm)
 }
 
-func (rm *regionMap) Len() int {
-	if rm == nil {
-		return 0
-	}
-	return len(rm.m)
-}
-
-func (rm *regionMap) Get(id uint64) *RegionInfo {
-	if rm == nil {
-		return nil
-	}
-	if r, ok := rm.m[id]; ok {
-		return r
+func (rm regionMap) Get(id uint64) *RegionInfo {
+	if item, ok := rm[id]; ok {
+		return item.region
 	}
 	return nil
 }
 
-func (rm *regionMap) Put(region *RegionInfo) {
-	if old, ok := rm.m[region.GetID()]; ok {
-		rm.totalSize -= old.approximateSize
-		rm.totalKeys -= old.approximateKeys
-	}
-	rm.m[region.GetID()] = region
-	rm.totalSize += region.approximateSize
-	rm.totalKeys += region.approximateKeys
-}
-
-func (rm *regionMap) Delete(id uint64) {
-	if rm == nil {
+func (rm regionMap) Put(region *RegionInfo) {
+	if item, ok := rm[region.GetID()]; ok {
+		item.region = region
 		return
 	}
-	if old, ok := rm.m[id]; ok {
-		delete(rm.m, id)
-		rm.totalSize -= old.approximateSize
-		rm.totalKeys -= old.approximateKeys
-	}
+	rm[region.GetID()] = &regionItem{region: region}
 }
 
-func (rm *regionMap) TotalSize() int64 {
-	if rm.Len() == 0 {
-		return 0
-	}
-	return rm.totalSize
+func (rm regionMap) Delete(id uint64) {
+	delete(rm, id)
 }
 
 // RegionsInfo for export
 type RegionsInfo struct {
 	tree         *regionTree
-	regions      *regionMap             // regionID -> regionInfo
+	regions      regionMap              // regionID -> regionInfo
 	leaders      map[uint64]*regionTree // storeID -> regionSubTree
 	followers    map[uint64]*regionTree // storeID -> regionSubTree
 	learners     map[uint64]*regionTree // storeID -> regionSubTree
@@ -539,12 +511,12 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
 }
 
 // Length returns the RegionsInfo length
-func (r *RegionsInfo) Length() int {
+func (r *RegionsInfo) Len() int {
 	return r.regions.Len()
 }
 
 // TreeLength returns the RegionsInfo tree length(now only used in test)
-func (r *RegionsInfo) TreeLength() int {
+func (r *RegionsInfo) TreeLen() int {
 	return r.tree.length()
 }
 
@@ -748,8 +720,8 @@ func (r *RegionsInfo) SearchPrevRegion(regionKey []byte) *RegionInfo {
 // GetRegions gets all RegionInfo from regionMap
 func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	regions := make([]*RegionInfo, 0, r.regions.Len())
-	for _, region := range r.regions.m {
-		regions = append(regions, region)
+	for _, item := range r.regions {
+		regions = append(regions, item.region)
 	}
 	return regions
 }
@@ -792,8 +764,8 @@ func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) int64 {
 // GetMetaRegions gets a set of metapb.Region from regionMap
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	regions := make([]*metapb.Region, 0, r.regions.Len())
-	for _, region := range r.regions.m {
-		regions = append(regions, proto.Clone(region.meta).(*metapb.Region))
+	for _, item := range r.regions {
+		regions = append(regions, proto.Clone(item.region.meta).(*metapb.Region))
 	}
 	return regions
 }
@@ -923,10 +895,10 @@ func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Regi
 
 // GetAverageRegionSize returns the average region approximate size.
 func (r *RegionsInfo) GetAverageRegionSize() int64 {
-	if r.regions.Len() == 0 {
+	if r.tree.length() == 0 {
 		return 0
 	}
-	return r.regions.TotalSize() / int64(r.regions.Len())
+	return r.tree.TotalSize() / int64(r.tree.length())
 }
 
 // DiffRegionPeersInfo return the difference of peers info  between two RegionInfo
