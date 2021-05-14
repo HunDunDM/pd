@@ -499,8 +499,8 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
 	peersChanged := true
 	if item = r.regions.Get(region.GetID()); item != nil {
 		origin := item.region
-		rangeChanged = bytes.Equal(origin.GetStartKey(), region.GetStartKey()) &&
-			bytes.Equal(origin.GetEndKey(), region.GetEndKey())
+		rangeChanged = !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) ||
+			!bytes.Equal(origin.GetEndKey(), region.GetEndKey())
 		peersChanged = r.shouldRemoveFromSubTree(region, origin)
 		if rangeChanged {
 			r.tree.remove(origin)
@@ -573,8 +573,8 @@ func (r *RegionsInfo) addRegion(item *regionItem, region *RegionInfo, rangeChang
 	if rangeChanged {
 		// Add to tree.
 		overlaps = r.tree.update(item)
-		for _, item := range overlaps {
-			r.RemoveRegion(r.GetRegion(item.GetID()))
+		for _, old := range overlaps {
+			r.RemoveRegion(r.GetRegion(old.GetID()))
 		}
 	} else {
 		r.tree.updateStat(origin, region)
