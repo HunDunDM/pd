@@ -96,21 +96,21 @@ func (t *regionTree) getOverlaps(region *RegionInfo) []*RegionInfo {
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
-func (t *regionTree) update(region *RegionInfo) []*RegionInfo {
+func (t *regionTree) update(item *regionItem) []*RegionInfo {
+	region := item.region
 	t.totalSize += region.approximateSize
-
 	overlaps := t.getOverlaps(region)
-	for _, item := range overlaps {
-		log.Debug("overlapping region",
-			zap.Uint64("region-id", item.GetID()),
-			logutil.ZapRedactStringer("delete-region", RegionToHexMeta(item.GetMeta())),
-			logutil.ZapRedactStringer("update-region", RegionToHexMeta(region.GetMeta())))
-		t.tree.Delete(&regionItem{item})
 
-		t.totalSize -= item.approximateSize
+	for _, old := range overlaps {
+		log.Debug("overlapping region",
+			zap.Uint64("region-id", old.GetID()),
+			logutil.ZapRedactStringer("delete-region", RegionToHexMeta(old.GetMeta())),
+			logutil.ZapRedactStringer("update-region", RegionToHexMeta(region.GetMeta())))
+		t.tree.Delete(&regionItem{old})
+		t.totalSize -= old.approximateSize
 	}
 
-	t.tree.ReplaceOrInsert(&regionItem{region: region})
+	t.tree.ReplaceOrInsert(item)
 	return overlaps
 }
 
@@ -220,6 +220,11 @@ func (t *regionTree) getAdjacentRegions(region *RegionInfo) (*regionItem, *regio
 		return false
 	})
 	return prev, next
+}
+
+func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
+	t.totalSize += region.approximateSize
+	t.totalSize -= origin.approximateSize
 }
 
 // RandomRegion is used to get a random region within ranges.
