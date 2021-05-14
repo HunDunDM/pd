@@ -449,10 +449,7 @@ func (rm regionMap) Len() int {
 }
 
 func (rm regionMap) Get(id uint64) *regionItem {
-	if item, ok := rm[id]; ok {
-		return item
-	}
-	return nil
+	return rm[id]
 }
 
 func (rm regionMap) Add(region *RegionInfo) *regionItem {
@@ -506,12 +503,13 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
 			bytes.Equal(origin.GetEndKey(), region.GetEndKey())
 		peersChanged = r.shouldRemoveFromSubTree(region, origin)
 		if rangeChanged {
-			r.removeRegionFromTreeAndMap(origin)
+			r.tree.remove(origin)
 		}
 		if peersChanged {
 			r.removeRegionFromSubTree(origin)
 		}
 		if !rangeChanged && !peersChanged {
+			r.tree.updateStat(item.region, region)
 			r.updateSubTreeStat(item.region, region)
 			item.region = region
 			return nil
@@ -634,16 +632,10 @@ func (r *RegionsInfo) addRegion(item *regionItem, region *RegionInfo, rangeChang
 // RemoveRegion removes RegionInfo from regionTree and regionMap
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	// Remove from tree and regions.
-	r.removeRegionFromTreeAndMap(region)
-	// Remove from leaders and followers.
-	r.removeRegionFromSubTree(region)
-}
-
-// removeRegionFromTreeAndMap removes RegionInfo from regionTree and regionMap
-func (r *RegionsInfo) removeRegionFromTreeAndMap(region *RegionInfo) {
-	// Remove from tree and regions.
 	r.tree.remove(region)
 	r.regions.Delete(region.GetID())
+	// Remove from leaders and followers.
+	r.removeRegionFromSubTree(region)
 }
 
 // removeRegionFromSubTree removes RegionInfo from regionSubTrees

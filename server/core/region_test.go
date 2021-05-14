@@ -300,7 +300,7 @@ func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
 	}, peer1)
 
 	origin := NewRegionInfo(&metapb.Region{
-		Id:       uint64(2),
+		Id:       uint64(1),
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
 		StartKey: []byte(fmt.Sprintf("%20d", 20)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 30)),
@@ -318,7 +318,7 @@ func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
 	region.learners = append(region.learners, peer2)
 	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
 
-	origin.learners = append(origin.learners, peer3, peer2)
+	origin.learners = append(origin.learners, peer2, peer3)
 	region.learners = append(region.learners, peer4)
 	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
 
