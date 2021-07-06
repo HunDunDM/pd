@@ -161,16 +161,19 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	h.summaryPendingInfluence()
 
+	stores := cluster.GetStores()
 	storesLoads := cluster.GetStoresLoads()
 
 	{ // update read statistics
 		regionRead := cluster.RegionReadStats()
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
+			stores,
 			storesLoads,
 			h.pendingSums,
 			regionRead,
 			read, core.LeaderKind)
 		h.stLoadInfos[readPeer] = summaryStoresLoad(
+			stores,
 			storesLoads,
 			h.pendingSums,
 			regionRead,
@@ -180,12 +183,13 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	{ // update write statistics
 		regionWrite := cluster.RegionWriteStats()
 		h.stLoadInfos[writeLeader] = summaryStoresLoad(
+			stores,
 			storesLoads,
 			h.pendingSums,
 			regionWrite,
 			write, core.LeaderKind)
-
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
+			stores,
 			storesLoads,
 			h.pendingSums,
 			regionWrite,
@@ -217,6 +221,7 @@ func (h *hotScheduler) gcRegionPendings() {
 // summaryStoresLoad Load information of all available stores.
 // it will filtered the hot peer and calculate the current and future stat(byte/key rate,count) for each store
 func summaryStoresLoad(
+	stores []*core.StoreInfo,
 	storesLoads map[uint64][]float64,
 	storePendings map[uint64]*Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
@@ -229,7 +234,13 @@ func summaryStoresLoad(
 	allCount := 0.0
 
 	// Stores without byte rate statistics is not available to schedule.
-	for id, storeLoads := range storesLoads {
+	for _, store := range stores {
+		id := store.GetID()
+		storeLoads, ok := storesLoads[id]
+		if !ok {
+			continue
+		}
+		isTiFlash := core.IsTiFlashStore(store.GetMeta())
 		loads := make([]float64, statistics.DimLen)
 		switch rwTy {
 		case read:
@@ -237,10 +248,22 @@ func summaryStoresLoad(
 			loads[statistics.KeyDim] = storeLoads[statistics.StoreReadKeys]
 			loads[statistics.QueryDim] = storeLoads[statistics.StoreReadQuery]
 		case write:
-			loads[statistics.ByteDim] = storeLoads[statistics.StoreWriteBytes]
-			loads[statistics.KeyDim] = storeLoads[statistics.StoreWriteKeys]
+			if isTiFlash {
+				loads[statistics.ByteDim] = storeLoads[statistics.StoreRegionsWriteBytes]
+				loads[statistics.KeyDim] = storeLoads[statistics.StoreRegionsWriteKeys]
+			} else {
+				loads[statistics.ByteDim] = storeLoads[statistics.StoreWriteBytes]
+				loads[statistics.KeyDim] = storeLoads[statistics.StoreWriteKeys]
+			}
 			loads[statistics.QueryDim] = storeLoads[statistics.StoreWriteQuery]
 		}
+		if !isTiFlash {
+			// The TiFlash flow is isolated from TiKV, so it is not counted in the sum.
+			for i := range allLoadSum {
+				allLoadSum[i] += loads[i]
+			}
+		}
+
 		// Find all hot peers first
 		var hotPeers []*statistics.HotPeerStat
 		{
@@ -274,9 +297,6 @@ func summaryStoresLoad(
 				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.QueryDim])
 			}
 		}
-		for i := range allLoadSum {
-			allLoadSum[i] += loads[i]
-		}
 		allCount += float64(len(hotPeers))
 
 		// Build store load prediction from current load and pending influence.
@@ -287,8 +307,10 @@ func summaryStoresLoad(
 
 		// Construct store load info.
 		loadDetail[id] = &storeLoadDetail{
-			LoadPred: stLoadPred,
-			HotPeers: hotPeers,
+			Store:     store,
+			IsTiFlash: isTiFlash,
+			LoadPred:  stLoadPred,
+			HotPeers:  hotPeers,
 		}
 	}
 	storeLen := float64(len(storesLoads))
@@ -537,10 +559,6 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail)
 	for id, detail := range bs.stLoadDetail {
-		if bs.cluster.GetStore(id) == nil {
-			log.Error("failed to get the source store", zap.Uint64("store-id", id), errs.ZapError(errs.ErrGetSourceStore))
-			continue
-		}
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
@@ -689,10 +707,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 		filters    []filter.Filter
 		candidates []*core.StoreInfo
 	)
-	srcStore := bs.cluster.GetStore(bs.cur.srcStoreID)
-	if srcStore == nil {
-		return nil
-	}
+	srcStore := bs.stLoadDetail[bs.cur.srcStoreID].Store
 	switch bs.opTy {
 	case movePeer:
 		filters = []filter.Filter{
@@ -702,8 +717,8 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore),
 		}
 
-		for storeID := range bs.stLoadDetail {
-			candidates = append(candidates, bs.cluster.GetStore(storeID))
+		for _, detail := range bs.stLoadDetail {
+			candidates = append(candidates, detail.Store)
 		}
 
 	case transferLeader:

@@ -410,8 +410,10 @@ func maxLoad(a, b *storeLoad) *storeLoad {
 }
 
 type storeLoadDetail struct {
-	LoadPred *storeLoadPred
-	HotPeers []*statistics.HotPeerStat
+	Store     *core.StoreInfo
+	IsTiFlash bool
+	LoadPred  *storeLoadPred
+	HotPeers  []*statistics.HotPeerStat
 }
 
 func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
