@@ -599,21 +599,21 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
 	storage := c.storage
 	coreCluster := c.core
-	hotStat := c.hotStat
+	// hotStat := c.hotStat
 	c.RUnlock()
 
 	origin, err := coreCluster.PreCheckPutRegion(region)
 	if err != nil {
 		return err
 	}
-	hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
-	hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
-	reportInterval := region.GetInterval()
-	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
-		hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
-	}
+	// hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
+	// hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
+	// reportInterval := region.GetInterval()
+	// interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	// for _, peer := range region.GetPeers() {
+	//	peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
+	//	hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
+	// }
 
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
