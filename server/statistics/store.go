@@ -28,9 +28,9 @@ const (
 	storeStatsRollingWindowsSize = 3
 
 	// RegionsStatsObserveInterval is the interval for obtaining statistics from RegionTree
-	RegionsStatsObserveInterval = RegionHeartBeatReportInterval * time.Second
+	RegionsStatsObserveInterval = 30 * time.Second
 	// RegionsStatsRollingWindowsSize is default size of median filter for data from regionStats
-	RegionsStatsRollingWindowsSize = 10
+	RegionsStatsRollingWindowsSize = 9
 )
 
 // StoresStats is a cache hold hot regions.
