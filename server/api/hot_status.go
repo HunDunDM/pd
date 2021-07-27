@@ -17,6 +17,7 @@ import (
 	"net/http"
 
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 )
@@ -71,11 +72,21 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 		KeysWriteStats:  make(map[uint64]float64),
 		KeysReadStats:   make(map[uint64]float64),
 	}
-	for id, loads := range h.GetStoresLoads() {
-		stats.BytesWriteStats[id] = loads[statistics.StoreWriteBytes]
-		stats.BytesReadStats[id] = loads[statistics.StoreReadBytes]
-		stats.KeysWriteStats[id] = loads[statistics.StoreWriteKeys]
-		stats.KeysReadStats[id] = loads[statistics.StoreReadKeys]
+	stores, _ := h.GetStores()
+	storesLoads := h.GetStoresLoads()
+	for _, store := range stores {
+		id := store.GetID()
+		if loads, ok := storesLoads[id]; ok {
+			if core.IsTiFlashStore(store.GetMeta()) {
+				stats.BytesWriteStats[id] = loads[statistics.StoreRegionsWriteBytes]
+				stats.KeysWriteStats[id] = loads[statistics.StoreRegionsWriteKeys]
+			} else {
+				stats.BytesWriteStats[id] = loads[statistics.StoreWriteBytes]
+				stats.KeysWriteStats[id] = loads[statistics.StoreWriteKeys]
+			}
+			stats.BytesReadStats[id] = loads[statistics.StoreReadBytes]
+			stats.KeysReadStats[id] = loads[statistics.StoreReadKeys]
+		}
 	}
 	h.rd.JSON(w, http.StatusOK, stats)
 }
