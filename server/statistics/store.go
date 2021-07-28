@@ -191,44 +191,23 @@ func (r *RollingStoreStats) GetLoad(k StoreStatKind) float64 {
 	r.RLock()
 	defer r.RUnlock()
 	switch k {
-	case StoreReadBytes:
-		return r.timeMedians[StoreReadBytes].Get()
-	case StoreReadKeys:
-		return r.timeMedians[StoreReadKeys].Get()
-	case StoreWriteBytes:
-		return r.timeMedians[StoreWriteBytes].Get()
-	case StoreWriteKeys:
-		return r.timeMedians[StoreWriteKeys].Get()
-	case StoreCPUUsage:
-		return r.movingAvgs[StoreCPUUsage].Get()
-	case StoreDiskReadRate:
-		return r.movingAvgs[StoreDiskReadRate].Get()
-	case StoreDiskWriteRate:
-		return r.movingAvgs[StoreDiskWriteRate].Get()
+	case StoreReadBytes, StoreReadKeys, StoreWriteBytes, StoreWriteKeys:
+		return r.timeMedians[k].Get()
+	case StoreCPUUsage, StoreDiskReadRate, StoreDiskWriteRate:
+		return r.movingAvgs[k].Get()
 	}
 	return 0
 }
 
 // GetInstantLoad returns store's instant load.
-// MovingAvgs do not support GetInstantaneous() so they return average values.
 func (r *RollingStoreStats) GetInstantLoad(k StoreStatKind) float64 {
 	r.RLock()
 	defer r.RUnlock()
 	switch k {
-	case StoreReadBytes:
-		return r.timeMedians[StoreReadBytes].GetInstantaneous()
-	case StoreReadKeys:
-		return r.timeMedians[StoreReadKeys].GetInstantaneous()
-	case StoreWriteBytes:
-		return r.timeMedians[StoreWriteBytes].GetInstantaneous()
-	case StoreWriteKeys:
-		return r.timeMedians[StoreWriteKeys].GetInstantaneous()
-	case StoreCPUUsage:
-		return r.movingAvgs[StoreCPUUsage].Get()
-	case StoreDiskReadRate:
-		return r.movingAvgs[StoreDiskReadRate].Get()
-	case StoreDiskWriteRate:
-		return r.movingAvgs[StoreDiskWriteRate].Get()
+	case StoreReadBytes, StoreReadKeys, StoreWriteBytes, StoreWriteKeys:
+		return r.timeMedians[k].GetInstantaneous()
+	case StoreCPUUsage, StoreDiskReadRate, StoreDiskWriteRate:
+		return r.movingAvgs[k].GetInstantaneous()
 	}
 	return 0
 }
