@@ -77,17 +77,18 @@ type hotScheduler struct {
 	types []rwType
 	r     *rand.Rand
 
-	// states across multiple `Schedule` calls
-	pendings map[*pendingInfluence]struct{}
-	// regionPendings stores regionID -> Operator
+	// regionPendings stores regionID -> pendingInfluence
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
-	regionPendings map[uint64]*operator.Operator
+	regionPendings map[uint64]*pendingInfluence
 
+	// store information, including pending Influence by resource type
+	// Every time Schedule will recalculate it.
+	stInfos map[uint64]*storeInfo
 	// temporary states but exported to API or metrics
+	// Every time Schedule will recalculate it.
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
-	// This stores the pending Influence for each store by resource type.
-	pendingSums map[uint64]*Influence
+
 	// config of hot scheduler
 	conf *hotRegionSchedulerConfig
 }
@@ -99,8 +100,7 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 		BaseScheduler:  base,
 		types:          []rwType{write, read},
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
-		pendings:       map[*pendingInfluence]struct{}{},
-		regionPendings: make(map[uint64]*operator.Operator),
+		regionPendings: make(map[uint64]*pendingInfluence),
 		conf:           conf,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
@@ -159,23 +159,20 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
 // each store
 func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
+	h.stInfos = summaryStoreInfos(cluster)
 	h.summaryPendingInfluence()
-
-	stores := cluster.GetStores()
 	storesLoads := cluster.GetStoresLoads()
 
 	{ // update read statistics
 		regionRead := cluster.RegionReadStats()
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
-			stores,
+			h.stInfos,
 			storesLoads,
-			h.pendingSums,
 			regionRead,
 			read, core.LeaderKind)
 		h.stLoadInfos[readPeer] = summaryStoresLoad(
-			stores,
+			h.stInfos,
 			storesLoads,
-			h.pendingSums,
 			regionRead,
 			read, core.RegionKind)
 	}
@@ -183,16 +180,13 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	{ // update write statistics
 		regionWrite := cluster.RegionWriteStats()
 		h.stLoadInfos[writeLeader] = summaryStoresLoad(
-			stores,
+			h.stInfos,
 			storesLoads,
-			h.pendingSums,
 			regionWrite,
 			write, core.LeaderKind)
-
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
-			stores,
+			h.stInfos,
 			storesLoads,
-			h.pendingSums,
 			regionWrite,
 			write, core.RegionKind)
 	}
@@ -200,143 +194,37 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
+// It makes each key/byte rate or count become (1+w) times to the origin value while f is the function to provide w(weight).
 func (h *hotScheduler) summaryPendingInfluence() {
-	h.pendingSums = summaryPendingInfluence(h.pendings, h.calcPendingWeight)
-	h.gcRegionPendings()
-}
+	storeZombieDur := h.conf.GetStoreStatZombieDuration()
+	regionsZombieDur := h.conf.GetRegionsStatZombieDuration()
 
-// gcRegionPendings check the region whether it need to be deleted from regionPendings depended on whether it have
-// ended operator
-func (h *hotScheduler) gcRegionPendings() {
-	for regionID, op := range h.regionPendings {
-		if op != nil && op.IsEnd() {
-			if time.Now().After(op.GetCreateTime().Add(h.conf.GetMaxZombieDuration())) {
-				log.Debug("gc pending influence in hot region scheduler", zap.Uint64("region-id", regionID), zap.Time("create", op.GetCreateTime()), zap.Time("now", time.Now()), zap.Duration("zombie", h.conf.GetMaxZombieDuration()))
-				schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
-				delete(h.regionPendings, regionID)
-			}
+	for id, p := range h.regionPendings {
+		from := h.stInfos[p.from]
+		to := h.stInfos[p.to]
+		maxZombieDur := storeZombieDur
+		if (from != nil && from.IsTiFlash) || (to != nil && to.IsTiFlash) {
+			maxZombieDur = regionsZombieDur
 		}
-	}
-}
+		weight, needGC := h.calcPendingInfluence(p.op, maxZombieDur)
 
-// summaryStoresLoad Load information of all available stores.
-// it will filtered the hot peer and calculate the current and future stat(byte/key rate,count) for each store
-func summaryStoresLoad(
-	stores []*core.StoreInfo,
-	storesLoads map[uint64][]float64,
-	storePendings map[uint64]*Influence,
-	storeHotPeers map[uint64][]*statistics.HotPeerStat,
-	rwTy rwType,
-	kind core.ResourceKind,
-) map[uint64]*storeLoadDetail {
-	// loadDetail stores the storeID -> hotPeers stat and its current and future stat(key/byte rate,count)
-	loadDetail := make(map[uint64]*storeLoadDetail, len(storesLoads))
-	allLoadSum := make([]float64, statistics.DimLen)
-	allCount := 0.0
-
-	// Stores without byte rate statistics is not available to schedule.
-	for _, store := range stores {
-		id := store.GetID()
-		storeLoads, ok := storesLoads[id]
-		if !ok {
+		if needGC {
+			delete(h.regionPendings, id)
+			log.Debug("gc pending influence in hot region scheduler",
+				zap.Uint64("region-id", id),
+				zap.Time("create", p.op.GetCreateTime()),
+				zap.Time("now", time.Now()),
+				zap.Duration("zombie", maxZombieDur))
 			continue
 		}
-		loads := make([]float64, statistics.DimLen)
-		switch rwTy {
-		case read:
-			loads[statistics.ByteDim] = storeLoads[statistics.StoreReadBytes]
-			loads[statistics.KeyDim] = storeLoads[statistics.StoreReadKeys]
-		case write:
-			loads[statistics.ByteDim] = storeLoads[statistics.StoreWriteBytes]
-			loads[statistics.KeyDim] = storeLoads[statistics.StoreWriteKeys]
-		}
-		// Find all hot peers first
-		var hotPeers []*statistics.HotPeerStat
-		{
-			peerLoadSum := make([]float64, statistics.DimLen)
-			// TODO: To remove `filterHotPeers`, we need to:
-			// HotLeaders consider `Write{Bytes,Keys}`, so when we schedule `writeLeader`, all peers are leader.
-			for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
-				for i := range peerLoadSum {
-					peerLoadSum[i] += peer.GetLoad(getRegionStatKind(rwTy, i))
-				}
-				hotPeers = append(hotPeers, peer.Clone())
-			}
-			// Use sum of hot peers to estimate leader-only byte rate.
-			// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time, while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
-			// But none of the current dimension reflect this difference, so we create a new dimension to reflect it.
-			if kind == core.LeaderKind && rwTy == write {
-				loads = peerLoadSum
-			}
 
-			// Metric for debug.
-			{
-				ty := "byte-rate-" + rwTy.String() + "-" + kind.String()
-				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.ByteDim])
-			}
-			{
-				ty := "key-rate-" + rwTy.String() + "-" + kind.String()
-				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.KeyDim])
-			}
+		if from != nil && weight > 0 {
+			from.addInfluence(&p.origin, -weight)
 		}
-		for i := range allLoadSum {
-			allLoadSum[i] += loads[i]
-		}
-		allCount += float64(len(hotPeers))
-
-		// Build store load prediction from current load and pending influence.
-		stLoadPred := (&storeLoad{
-			Loads: loads,
-			Count: float64(len(hotPeers)),
-		}).ToLoadPred(rwTy, storePendings[id])
-
-		// Construct store load info.
-		loadDetail[id] = &storeLoadDetail{
-			Store:    store,
-			LoadPred: stLoadPred,
-			HotPeers: hotPeers,
+		if to != nil && weight > 0 {
+			to.addInfluence(&p.origin, weight)
 		}
 	}
-	storeLen := float64(len(storesLoads))
-	// store expectation byte/key rate and count for each store-load detail.
-	for id, detail := range loadDetail {
-		expectLoads := make([]float64, len(allLoadSum))
-		for i := range expectLoads {
-			expectLoads[i] = allLoadSum[i] / storeLen
-		}
-		expectCount := allCount / storeLen
-		detail.LoadPred.Expect.Loads = expectLoads
-		detail.LoadPred.Expect.Count = expectCount
-		// Debug
-		{
-			ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.ByteDim])
-		}
-		{
-			ty := "exp-key-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.KeyDim])
-		}
-		{
-			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectCount)
-		}
-	}
-	return loadDetail
-}
-
-// filterHotPeers filter the peer whose hot degree is less than minHotDegress
-func filterHotPeers(
-	kind core.ResourceKind,
-	peers []*statistics.HotPeerStat,
-) []*statistics.HotPeerStat {
-	ret := make([]*statistics.HotPeerStat, 0, len(peers))
-	for _, peer := range peers {
-		if kind == core.LeaderKind && !peer.IsLeader() {
-			continue
-		}
-		ret = append(ret, peer)
-	}
-	return ret
 }
 
 func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence) bool {
@@ -348,8 +236,7 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 	}
 
 	influence := newPendingInfluence(op, srcStore, dstStore, infl)
-	h.pendings[influence] = struct{}{}
-	h.regionPendings[regionID] = op
+	h.regionPendings[regionID] = influence
 
 	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Inc()
 	return true
@@ -538,13 +425,26 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 // its expectation * ratio, the store would be selected as hot source store
 func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail)
+	confSrcToleranceRatio := bs.sche.conf.GetSrcToleranceRatio()
+	confEnableForTiFlash := bs.sche.conf.GetEnableForTiFlash()
 	for id, detail := range bs.stLoadDetail {
+		srcToleranceRatio := confSrcToleranceRatio
+		if detail.Info.IsTiFlash {
+			if !confEnableForTiFlash {
+				continue
+			}
+			if bs.rwTy != write || bs.opTy != movePeer {
+				continue
+			}
+			srcToleranceRatio = 0
+		}
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
+
 		minLoad := detail.LoadPred.min()
 		if slice.AllOf(minLoad.Loads, func(i int) bool {
-			return minLoad.Loads[i] > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.Loads[i]
+			return minLoad.Loads[i] > srcToleranceRatio*detail.LoadPred.Expect.Loads[i]
 		}) {
 			ret[id] = detail
 			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
@@ -629,10 +529,11 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 		return false
 	}
 
-	if op, ok := bs.sche.regionPendings[region.GetID()]; ok {
+	if influence, ok := bs.sche.regionPendings[region.GetID()]; ok {
 		if bs.opTy == transferLeader {
 			return false
 		}
+		op := influence.op
 		if op.Kind()&operator.OpRegion != 0 ||
 			(op.Kind()&operator.OpLeader != 0 && !op.IsEnd()) {
 			return false
@@ -684,7 +585,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 		filters    []filter.Filter
 		candidates []*storeLoadDetail
 	)
-	srcStore := bs.stLoadDetail[bs.cur.srcStoreID].Store
+	srcStore := bs.stLoadDetail[bs.cur.srcStoreID].Info.Store
 	switch bs.opTy {
 	case movePeer:
 		filters = []filter.Filter{
@@ -721,9 +622,20 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 
 func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*storeLoadDetail) map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
-	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
+	confDstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
+	confEnableForTiFlash := bs.sche.conf.GetEnableForTiFlash()
 	for _, detail := range candidates {
-		store := detail.Store
+		store := detail.Info.Store
+		dstToleranceRatio := confDstToleranceRatio
+		if detail.Info.IsTiFlash {
+			if !confEnableForTiFlash {
+				continue
+			}
+			if bs.rwTy != write || bs.opTy != movePeer {
+				continue
+			}
+			dstToleranceRatio = 0
+		}
 		if filter.Target(bs.cluster.GetOpts(), store, filters) {
 			maxLoads := detail.LoadPred.max().Loads
 			if slice.AllOf(maxLoads, func(i int) bool {
@@ -1057,40 +969,52 @@ func (h *hotScheduler) GetHotStatus(typ string) *statistics.StoreHotPeersInfos {
 func (h *hotScheduler) GetPendingInfluence() map[uint64]*Influence {
 	h.RLock()
 	defer h.RUnlock()
-	ret := make(map[uint64]*Influence, len(h.pendingSums))
-	for id, infl := range h.pendingSums {
-		ret[id] = infl.add(infl, 0) // copy
+	ret := make(map[uint64]*Influence, len(h.stInfos))
+	for id, info := range h.stInfos {
+		if info.PendingSum != nil {
+			ret[id] = info.PendingSum
+		}
 	}
 	return ret
 }
 
-// calcPendingWeight return the calculate weight of one Operator, the value will between [0,1]
-func (h *hotScheduler) calcPendingWeight(op *operator.Operator) float64 {
-	if op.CheckExpired() || op.CheckTimeout() {
-		return 0
-	}
+// calcPendingInfluence return the calculate weight of one Operator, the value will between [0,1]
+func (h *hotScheduler) calcPendingInfluence(op *operator.Operator, maxZombieDur time.Duration) (weight float64, needGC bool) {
 	status := op.Status()
-	if !operator.IsEndStatus(status) {
-		return 1
+	switch {
+	case op.CheckExpired():
+		status = operator.EXPIRED
+	case op.CheckTimeout():
+		status = operator.TIMEOUT
 	}
+
+	if !operator.IsEndStatus(status) {
+		return 1, false
+	}
+
+	zombieDur := time.Since(op.GetReachTimeOf(status))
+	if zombieDur >= maxZombieDur {
+		weight = 0
+	} else {
+		// TODO: use store statistics update time to make a more accurate estimation
+		// weight = float64(maxZombieDur-zombieDur) / float64(maxZombieDur)
+		weight = 1
+	}
+
 	switch status {
 	case operator.SUCCESS:
-		zombieDur := time.Since(op.GetReachTimeOf(status))
-		maxZombieDur := h.conf.GetMaxZombieDuration()
-		if zombieDur >= maxZombieDur {
-			return 0
-		}
-		// TODO: use store statistics update time to make a more accurate estimation
-		return float64(maxZombieDur-zombieDur) / float64(maxZombieDur)
+		return weight, weight == 0
+	case operator.CANCELED, operator.REPLACED, operator.TIMEOUT:
+		return 0, weight == 0
+	case operator.EXPIRED:
+		fallthrough
 	default:
-		return 0
+		return 0, true
 	}
 }
 
 func (h *hotScheduler) clearPendingInfluence() {
-	h.pendings = map[*pendingInfluence]struct{}{}
-	h.pendingSums = nil
-	h.regionPendings = make(map[uint64]*operator.Operator)
+	h.regionPendings = make(map[uint64]*pendingInfluence)
 }
 
 // rwType : the perspective of balance

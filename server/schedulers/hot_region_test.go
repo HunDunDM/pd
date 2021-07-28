@@ -82,7 +82,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 
-	notDoneOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
+	notDoneOp := func(region *core.RegionInfo, ty opType) *pendingInfluence {
 		var op *operator.Operator
 		var err error
 		switch ty {
@@ -93,40 +93,40 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		}
 		c.Assert(err, IsNil)
 		c.Assert(op, NotNil)
-		return op
+		return newPendingInfluence(op, 2, 4, Influence{})
 	}
-	doneOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
-		op := notDoneOp(region, ty)
-		op.Cancel()
-		return op
+	doneOp := func(region *core.RegionInfo, ty opType) *pendingInfluence {
+		infl := notDoneOp(region, ty)
+		infl.op.Cancel()
+		return infl
 	}
-	shouldRemoveOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
-		op := doneOp(region, ty)
-		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
-		return op
+	shouldRemoveOp := func(region *core.RegionInfo, ty opType) *pendingInfluence {
+		infl := doneOp(region, ty)
+		operator.SetOperatorStatusReachTime(infl.op, operator.CANCELED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
+		return infl
 	}
-	opCreaters := [3]func(region *core.RegionInfo, ty opType) *operator.Operator{shouldRemoveOp, notDoneOp, doneOp}
+	opCreaters := [3]func(region *core.RegionInfo, ty opType) *pendingInfluence{shouldRemoveOp, notDoneOp, doneOp}
 
 	typs := []opType{movePeer, transferLeader}
 
-	for i := 0; i < len(opCreaters); i++ {
+	for i, opCreator := range opCreaters {
 		for j, typ := range typs {
-			regionID := uint64(i*len(opCreaters) + j + 1)
+			regionID := uint64(i*len(typs) + j + 1)
 			region := newTestRegion(regionID)
-			hb.regionPendings[regionID] = opCreaters[i](region, typ)
+			hb.regionPendings[regionID] = opCreator(region, typ)
 		}
 	}
 
-	hb.gcRegionPendings()
+	hb.summaryPendingInfluence() // Calling this function will GC.
 
-	for i := 0; i < len(opCreaters); i++ {
+	for i := range opCreaters {
 		for j, typ := range typs {
-			regionID := uint64(i*len(opCreaters) + j + 1)
+			regionID := uint64(i*len(typs) + j + 1)
 			if i < 1 { // shouldRemoveOp
 				c.Assert(hb.regionPendings, Not(HasKey), regionID)
 			} else { // notDoneOp, doneOp
 				c.Assert(hb.regionPendings, HasKey, regionID)
-				kind := hb.regionPendings[regionID].Kind()
+				kind := hb.regionPendings[regionID].op.Kind()
 				switch typ {
 				case transferLeader:
 					c.Assert(kind&operator.OpLeader != 0, IsTrue)
@@ -1373,15 +1373,15 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	op := hb.Schedule(tc)[0]
 	c.Assert(op, NotNil)
 	hb.(*hotScheduler).summaryPendingInfluence()
-	pendingInfluence := hb.(*hotScheduler).pendingSums
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionWriteKeys], -0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionWriteBytes], -0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionWriteKeys], 0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionWriteBytes], 0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionReadKeys], -0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionReadBytes], -0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionReadKeys], 0.5*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[4].Loads[statistics.RegionReadBytes], 0.5*MB), IsTrue)
+	stInfos := hb.(*hotScheduler).stInfos
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteKeys], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteBytes], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[4].PendingSum.Loads[statistics.RegionWriteKeys], 0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[4].PendingSum.Loads[statistics.RegionWriteBytes], 0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionReadKeys], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionReadBytes], -0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[4].PendingSum.Loads[statistics.RegionReadKeys], 0.5*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[4].PendingSum.Loads[statistics.RegionReadBytes], 0.5*MB), IsTrue)
 
 	addRegionInfo(tc, write, []testRegionInfo{
 		{2, []uint64{1, 2, 3}, 0.7 * MB, 0.7 * MB},
@@ -1399,16 +1399,16 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	op = hb.Schedule(tc)[0]
 	c.Assert(op, NotNil)
 	hb.(*hotScheduler).summaryPendingInfluence()
-	pendingInfluence = hb.(*hotScheduler).pendingSums
+	stInfos = hb.(*hotScheduler).stInfos
 	// assert read/write influence is the sum of write peer and write leader
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionWriteKeys], -1.2*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionWriteBytes], -1.2*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[3].Loads[statistics.RegionWriteKeys], 0.7*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[3].Loads[statistics.RegionWriteBytes], 0.7*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionReadKeys], -1.2*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[1].Loads[statistics.RegionReadBytes], -1.2*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[3].Loads[statistics.RegionReadKeys], 0.7*MB), IsTrue)
-	c.Assert(nearlyAbout(pendingInfluence[3].Loads[statistics.RegionReadBytes], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteKeys], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteBytes], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[3].PendingSum.Loads[statistics.RegionWriteKeys], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[3].PendingSum.Loads[statistics.RegionWriteBytes], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionReadKeys], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionReadBytes], -1.2*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[3].PendingSum.Loads[statistics.RegionReadKeys], 0.7*MB), IsTrue)
+	c.Assert(nearlyAbout(stInfos[3].PendingSum.Loads[statistics.RegionReadBytes], 0.7*MB), IsTrue)
 }
 
 func nearlyAbout(f1, f2 float64) bool {

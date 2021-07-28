@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	"fmt"
 	"math"
 	"net/url"
 	"strconv"
@@ -207,16 +208,6 @@ type Influence struct {
 	Count float64
 }
 
-func (lhs *Influence) add(rhs *Influence, w float64) *Influence {
-	var infl Influence
-	for i := range lhs.Loads {
-		infl.Loads = append(infl.Loads, lhs.Loads[i]+rhs.Loads[i]*w)
-	}
-	infl.Count = infl.Count + rhs.Count*w
-	return &infl
-}
-
-// TODO: merge it into OperatorInfluence.
 type pendingInfluence struct {
 	op       *operator.Operator
 	from, to uint64
@@ -232,31 +223,7 @@ func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence)
 	}
 }
 
-// summaryPendingInfluence calculate the summary pending Influence for each store and return storeID -> Influence
-// It makes each key/byte rate or count become (1+w) times to the origin value while f is the function to provide w(weight)
-func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) float64) map[uint64]*Influence {
-	ret := make(map[uint64]*Influence)
-	for p := range pendings {
-		w := f(p.op)
-		if w == 0 {
-			delete(pendings, p)
-		}
-		if _, ok := ret[p.to]; !ok {
-			ret[p.to] = &Influence{Loads: make([]float64, len(p.origin.Loads))}
-		}
-		ret[p.to] = ret[p.to].add(&p.origin, w)
-		if _, ok := ret[p.from]; !ok {
-			ret[p.from] = &Influence{Loads: make([]float64, len(p.origin.Loads))}
-		}
-		ret[p.from] = ret[p.from].add(&p.origin, -w)
-	}
-	return ret
-}
-
-type storeLoad struct {
-	Loads []float64
-	Count float64
-}
+type storeLoad Influence
 
 func (load storeLoad) ToLoadPred(rwTy rwType, infl *Influence) *storeLoadPred {
 	future := storeLoad{
@@ -407,8 +374,44 @@ func maxLoad(a, b *storeLoad) *storeLoad {
 	}
 }
 
+type storeInfo struct {
+	Store      *core.StoreInfo
+	IsTiFlash  bool
+	PendingSum *Influence
+}
+
+func summaryStoreInfos(cluster opt.Cluster) map[uint64]*storeInfo {
+	stores := cluster.GetStores()
+	infos := make(map[uint64]*storeInfo, len(stores))
+	for _, store := range stores {
+		info := &storeInfo{
+			Store:      store,
+			IsTiFlash:  core.IsTiFlashStore(store.GetMeta()),
+			PendingSum: nil,
+		}
+		infos[store.GetID()] = info
+	}
+	return infos
+}
+
+func (s *storeInfo) addInfluence(infl *Influence, w float64) {
+	if infl == nil || w == 0 {
+		return
+	}
+	if s.PendingSum == nil {
+		s.PendingSum = &Influence{
+			Loads: make([]float64, len(infl.Loads)),
+			Count: 0,
+		}
+	}
+	for i, load := range infl.Loads {
+		s.PendingSum.Loads[i] += load * w
+	}
+	s.PendingSum.Count += infl.Count * w
+}
+
 type storeLoadDetail struct {
-	Store    *core.StoreInfo
+	Info     *storeInfo
 	LoadPred *storeLoadPred
 	HotPeers []*statistics.HotPeerStat
 }
@@ -465,4 +468,135 @@ func toHotPeerStatShow(p *statistics.HotPeerStat, kind rwType) statistics.HotPee
 		AntiCount:      p.AntiCount,
 		LastUpdateTime: p.LastUpdateTime,
 	}
+}
+
+// summaryStoresLoad Load information of all available stores.
+// it will filtered the hot peer and calculate the current and future stat(byte/key rate,count) for each store
+func summaryStoresLoad(
+	storeInfos map[uint64]*storeInfo,
+	storesLoads map[uint64][]float64,
+	storeHotPeers map[uint64][]*statistics.HotPeerStat,
+	rwTy rwType,
+	kind core.ResourceKind,
+) map[uint64]*storeLoadDetail {
+	// loadDetail stores the storeID -> hotPeers stat and its current and future stat(key/byte rate,count)
+	loadDetail := make(map[uint64]*storeLoadDetail, len(storesLoads))
+	allLoadSum := make([]float64, statistics.DimLen)
+	allCount := 0.0
+
+	// Stores without byte rate statistics is not available to schedule.
+	for _, info := range storeInfos {
+		store := info.Store
+		id := store.GetID()
+		storeLoads, ok := storesLoads[id]
+		if !ok {
+			continue
+		}
+		isTiFlash := core.IsTiFlashStore(store.GetMeta())
+		loads := make([]float64, statistics.DimLen)
+		switch rwTy {
+		case read:
+			loads[statistics.ByteDim] = storeLoads[statistics.StoreReadBytes]
+			loads[statistics.KeyDim] = storeLoads[statistics.StoreReadKeys]
+		case write:
+			if isTiFlash {
+				loads[statistics.ByteDim] = storeLoads[statistics.StoreRegionsWriteBytes]
+				loads[statistics.KeyDim] = storeLoads[statistics.StoreRegionsWriteKeys]
+			} else {
+				loads[statistics.ByteDim] = storeLoads[statistics.StoreWriteBytes]
+				loads[statistics.KeyDim] = storeLoads[statistics.StoreWriteKeys]
+			}
+		}
+
+		// Find all hot peers first
+		var hotPeers []*statistics.HotPeerStat
+		{
+			peerLoadSum := make([]float64, statistics.DimLen)
+			// TODO: To remove `filterHotPeers`, we need to:
+			// HotLeaders consider `Write{Bytes,Keys}`, so when we schedule `writeLeader`, all peers are leader.
+			for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
+				for i := range peerLoadSum {
+					peerLoadSum[i] += peer.GetLoad(getRegionStatKind(rwTy, i))
+				}
+				hotPeers = append(hotPeers, peer.Clone())
+			}
+			// Use sum of hot peers to estimate leader-only byte rate.
+			// For write requests, Write{Bytes, Keys} is applied to all Peers at the same time, while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
+			// But none of the current dimension reflect this difference, so we create a new dimension to reflect it.
+			if kind == core.LeaderKind && rwTy == write {
+				loads = peerLoadSum
+			}
+
+			// Metric for debug.
+			{
+				ty := "byte-rate-" + rwTy.String() + "-" + kind.String()
+				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.ByteDim])
+			}
+			{
+				ty := "key-rate-" + rwTy.String() + "-" + kind.String()
+				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[statistics.KeyDim])
+			}
+		}
+
+		if !isTiFlash {
+			// The TiFlash flow is isolated from TiKV, so it is not counted in the sum.
+			for i := range allLoadSum {
+				allLoadSum[i] += loads[i]
+			}
+		}
+		allCount += float64(len(hotPeers))
+
+		// Build store load prediction from current load and pending influence.
+		stLoadPred := (&storeLoad{
+			Loads: loads,
+			Count: float64(len(hotPeers)),
+		}).ToLoadPred(rwTy, info.PendingSum)
+
+		// Construct store load info.
+		loadDetail[id] = &storeLoadDetail{
+			Info:     info,
+			LoadPred: stLoadPred,
+			HotPeers: hotPeers,
+		}
+	}
+	storeLen := float64(len(storesLoads))
+	// store expectation byte/key rate and count for each store-load detail.
+	for id, detail := range loadDetail {
+		expectLoads := make([]float64, len(allLoadSum))
+		for i := range expectLoads {
+			expectLoads[i] = allLoadSum[i] / storeLen
+		}
+		expectCount := allCount / storeLen
+		detail.LoadPred.Expect.Loads = expectLoads
+		detail.LoadPred.Expect.Count = expectCount
+		// Debug
+		{
+			ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.ByteDim])
+		}
+		{
+			ty := "exp-key-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectLoads[statistics.KeyDim])
+		}
+		{
+			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(expectCount)
+		}
+	}
+	return loadDetail
+}
+
+// filterHotPeers filter the peer whose hot degree is less than minHotDegress
+func filterHotPeers(
+	kind core.ResourceKind,
+	peers []*statistics.HotPeerStat,
+) []*statistics.HotPeerStat {
+	ret := make([]*statistics.HotPeerStat, 0, len(peers))
+	for _, peer := range peers {
+		if kind == core.LeaderKind && !peer.IsLeader() {
+			continue
+		}
+		ret = append(ret, peer)
+	}
+	return ret
 }
