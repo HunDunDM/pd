@@ -481,7 +481,8 @@ func summaryStoresLoad(
 ) map[uint64]*storeLoadDetail {
 	// loadDetail stores the storeID -> hotPeers stat and its current and future stat(key/byte rate,count)
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storesLoads))
-	allLoadSum := make([]float64, statistics.DimLen)
+	allTiKVLoadSum := make([]float64, statistics.DimLen)
+	allTiFlashLoadSum := make([]float64, statistics.DimLen)
 	allCount := 0.0
 
 	// Stores without byte rate statistics is not available to schedule.
@@ -539,9 +540,12 @@ func summaryStoresLoad(
 		}
 
 		if !isTiFlash {
-			// The TiFlash flow is isolated from TiKV, so it is not counted in the sum.
-			for i := range allLoadSum {
-				allLoadSum[i] += loads[i]
+			for i := range allTiKVLoadSum {
+				allTiKVLoadSum[i] += loads[i]
+			}
+		} else {
+			for i := range allTiFlashLoadSum {
+				allTiFlashLoadSum[i] += loads[i]
 			}
 		}
 		allCount += float64(len(hotPeers))
@@ -562,6 +566,12 @@ func summaryStoresLoad(
 	storeLen := float64(len(storesLoads))
 	// store expectation byte/key rate and count for each store-load detail.
 	for id, detail := range loadDetail {
+		var allLoadSum []float64
+		if detail.Info.IsTiFlash {
+			allLoadSum = allTiFlashLoadSum
+		} else {
+			allLoadSum = allTiKVLoadSum
+		}
 		expectLoads := make([]float64, len(allLoadSum))
 		for i := range expectLoads {
 			expectLoads[i] = allLoadSum[i] / storeLen

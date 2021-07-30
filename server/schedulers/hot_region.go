@@ -436,7 +436,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 			if bs.rwTy != write || bs.opTy != movePeer {
 				continue
 			}
-			srcToleranceRatio = 0
+			srcToleranceRatio += 0.1
 		}
 		if len(detail.HotPeers) == 0 {
 			continue
@@ -634,7 +634,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 			if bs.rwTy != write || bs.opTy != movePeer {
 				continue
 			}
-			dstToleranceRatio = 0
+			dstToleranceRatio += 0.1
 		}
 		if filter.Target(bs.cluster.GetOpts(), store, filters) {
 			maxLoads := detail.LoadPred.max().Loads

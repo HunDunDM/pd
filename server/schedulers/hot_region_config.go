@@ -87,7 +87,7 @@ func (conf *hotRegionSchedulerConfig) GetRegionsStatZombieDuration() time.Durati
 	conf.RLock()
 	defer conf.RUnlock()
 	// Since RegionsStatsRollingWindowsSize is very large, multiply by 2.
-	return time.Duration(conf.MaxZombieRounds) * 2 * statistics.RegionHeartBeatReportInterval * time.Second
+	return time.Duration(conf.MaxZombieRounds+1) * statistics.RegionHeartBeatReportInterval * time.Second
 }
 
 func (conf *hotRegionSchedulerConfig) GetMaxPeerNumber() int {
