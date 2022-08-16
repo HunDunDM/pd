@@ -109,7 +109,7 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 }
 
 func (f *hotPeerCache) updateStat(item *HotPeerStat) {
-	if item.RegionID == atomic.LoadUint64(&observerRegionID) {
+	if item.RegionID == atomic.LoadUint64(&observerRegionID) || atomic.LoadUint64(&observerRegionID) == math.MaxUint64 {
 		if len(item.Loads) < 6 {
 			statLogger.Info("origin load stats - cold",
 				zap.Stringer("kind", f.kind),
