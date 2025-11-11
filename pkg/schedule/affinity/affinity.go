@@ -19,14 +19,13 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 )
 
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
 type Group struct {
 	// ID is a unique identifier for Group.
-	ID uint64
-	// Name is a unique identifier for Group.
-	Name string
+	ID string
 	// CreateTimestamp is the time when the Group was created.
 	CreateTimestamp uint64
 
@@ -46,12 +45,11 @@ type GroupInfo struct {
 	// Effect parameter indicates whether the current constraint is in effect.
 	// Constraints are typically released when the store is in an abnormal state.
 	Effect bool
-	// RegionCount indicates how many Regions are currently managed by this affinity group.
-	RegionCount uint64
-	// AffinityCount indicates how many Regions are currently in the affinity state.
-	AffinityCount uint64
+	// AffinityRegionCount indicates how many Regions are currently in the affinity state.
+	AffinityRegionCount uint64
 
 	regions map[uint64]struct{}
+	labels  map[string]*labeler.LabelRule
 }
 
 // Manager is the manager of all affinity information.
