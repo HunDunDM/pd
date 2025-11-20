@@ -76,13 +76,19 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	// Check if region has a leader
+	// Check region state
 	if region.GetLeader() == nil {
 		affinityCheckerRegionNoLeaderCounter.Inc()
 		return nil
 	}
-
-	// TODO: check region healthy
+	if !filter.IsRegionHealthy(region) {
+		affinityCheckerUnhealthyRegionCounter.Inc()
+		return nil
+	}
+	if !filter.IsRegionReplicated(c.cluster, region) {
+		affinityCheckerAbnormalReplicaCounter.Inc()
+		return nil
+	}
 
 	// Get the affinity group for this region
 	group, isAffinity := c.affinityManager.GetRegionAffinityGroupState(region)

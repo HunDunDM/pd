@@ -397,6 +397,9 @@ func (m *Manager) ObserveHealthyRegion(region *core.RegionInfo, group *GroupStat
 
 // GetRegionAffinityGroupState returns the affinity group state and isAffinity for a region.
 func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo) (*GroupState, bool) {
+	if region == nil {
+		return nil, false
+	}
 	cache, group := m.getCache(region)
 	if group == nil || region != cache.region {
 		groupID := m.regionLabeler.GetRegionLabel(region, labelKey)

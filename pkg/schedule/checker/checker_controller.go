@@ -307,7 +307,6 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		return ops
 	}
 
-	allowReplica := opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit()
 	if c.conf.IsPlacementRulesEnabled() {
 		if ops := measureChecker(c.metrics.checkRegionHistograms[ruleChecker], func() []*operator.Operator {
 			skipRuleCheck := c.cluster.GetCheckerConfig().IsPlacementRulesCacheEnabled() &&
@@ -323,7 +322,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 					panic("cached should be used")
 				})
 				fit := c.priorityInspector.Inspect(region)
-				if allowReplica {
+				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
 					return []*operator.Operator{c.ruleChecker.CheckWithFit(region, fit)}
 				}
 				operator.IncOperatorLimitCounter(c.ruleChecker.GetType(), operator.OpReplica)
@@ -342,7 +341,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 
 		if ops := measureChecker(c.metrics.checkRegionHistograms[replicaChecker], func() []*operator.Operator {
 			if op := c.replicaChecker.Check(region); op != nil {
-				if allowReplica {
+				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
 					return []*operator.Operator{op}
 				}
 				operator.IncOperatorLimitCounter(c.replicaChecker.GetType(), operator.OpReplica)
@@ -363,7 +362,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 
 	if ops := measureChecker(c.metrics.checkRegionHistograms[affinityChecker], func() []*operator.Operator {
 		if ops := c.affinityChecker.Check(region); ops != nil {
-			if allowReplica {
+			if opController.OperatorCount(operator.OpRegion) < c.conf.GetRegionScheduleLimit() {
 				return ops
 			}
 			operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpReplica)
