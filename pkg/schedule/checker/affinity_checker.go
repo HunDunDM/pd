@@ -85,16 +85,25 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	// TODO: check region healthy
 
 	// Get the affinity group for this region
-	group := c.affinityManager.GetRegionAffinityGroup(region)
+	group, isAffinity := c.affinityManager.GetRegionAffinityGroupState(region)
 	if group == nil {
 		// Region doesn't belong to any affinity group
 		return nil
 	}
-
-	// Check if the group is in effect
+	// If the Group is not effective, provide the healthy Region information and fetch it again.
 	if !group.Effect {
+		c.affinityManager.ObserveHealthyRegion(region, group)
+		group, isAffinity = c.affinityManager.GetRegionAffinityGroupState(region)
+	}
+	// Check if the group is in effect
+	if group == nil || !group.Effect {
 		affinityCheckerGroupNotInEffectCounter.Inc()
 		return nil
+	}
+
+	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
+	if isAffinity {
+		return c.MergeCheck(region)
 	}
 
 	// Create operator to adjust region according to affinity group
@@ -225,7 +234,7 @@ func (c *AffinityChecker) MergeCheck(region *core.RegionInfo) []*operator.Operat
 	}
 
 	// Check if region belongs to an affinity group and is an affinity region
-	group := c.affinityManager.GetRegionAffinityGroup(region)
+	group, _ := c.affinityManager.GetRegionAffinityGroupState(region)
 	if group == nil {
 		// Region doesn't belong to any affinity group
 		affinityMergeCheckerNoAffinityGroupCounter.Inc()
@@ -304,7 +313,7 @@ func (c *AffinityChecker) checkAffinityMergeTarget(region, adjacent *core.Region
 	}
 
 	// Check if adjacent region belongs to the same affinity group
-	adjacentGroup := c.affinityManager.GetRegionAffinityGroup(adjacent)
+	adjacentGroup, _ := c.affinityManager.GetRegionAffinityGroupState(adjacent)
 	if adjacentGroup == nil || adjacentGroup.ID != group.ID {
 		// Adjacent region is not in the same affinity group
 		affinityMergeCheckerAdjDifferentGroupCounter.Inc()
