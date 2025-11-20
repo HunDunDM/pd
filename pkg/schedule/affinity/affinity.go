@@ -168,6 +168,7 @@ func newGroupState(g *GroupInfo) *GroupState {
 		RegionCount:         len(g.Regions),
 		AffinityRegionCount: g.AffinityRegionCount,
 		affinityVer:         g.AffinityVer,
+		groupInfoPtr:        g,
 	}
 }
 
@@ -361,7 +362,7 @@ func (m *Manager) InvalidCache(regionID uint64) {
 	if !ok {
 		return
 	}
-	if cache.affinityVer == cache.groupInfo.AffinityVer {
+	if cache.isAffinity && cache.affinityVer == cache.groupInfo.AffinityVer {
 		cache.groupInfo.AffinityRegionCount--
 	}
 	delete(m.regions, regionID)
@@ -401,7 +402,7 @@ func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo) (*GroupSt
 		return nil, false
 	}
 	cache, group := m.getCache(region)
-	if group == nil || region != cache.region {
+	if cache == nil || group == nil || region != cache.region {
 		groupID := m.regionLabeler.GetRegionLabel(region, labelKey)
 		if groupID != "" {
 			group = m.GetAffinityGroupState(groupID)

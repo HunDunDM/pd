@@ -76,8 +76,8 @@ func HandleOverlaps(ctx context.Context, c Cluster, overlaps []*core.RegionInfo)
 			regionStats.ClearDefunctRegion(id)
 		}
 		labelStats.MarkDefunctRegion(id)
-		ruleManager.InvalidCache(item.GetID())
-		affinityManager.InvalidCache(item.GetID())
+		ruleManager.InvalidCache(id)
+		affinityManager.InvalidCache(id)
 	}
 }
 
