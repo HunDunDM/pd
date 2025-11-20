@@ -248,10 +248,6 @@ func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, le
 	if !ok {
 		return
 	}
-	// Reset Statistics
-	m.affinityRegionCount -= groupInfo.AffinityRegionCount
-	groupInfo.AffinityRegionCount = 0
-	groupInfo.AffinityVer++
 	// Set Effect
 	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
 		groupInfo.Effect = false
@@ -260,6 +256,10 @@ func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, le
 		groupInfo.LeaderStoreID = leaderStoreID
 		groupInfo.VoterStoreIDs = append([]uint64(nil), voterStoreIDs...)
 	}
+	// Reset Statistics
+	m.affinityRegionCount -= groupInfo.AffinityRegionCount
+	groupInfo.AffinityRegionCount = 0
+	groupInfo.AffinityVer++
 }
 
 func (m *Manager) updateGroupLabelsLocked(groupID string, labels *labeler.LabelRule) {
