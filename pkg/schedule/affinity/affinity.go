@@ -112,7 +112,7 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo, cache *regionCach
 	}
 
 	// Compare the Leader
-	if region.GetLeader().GetStoreId() != cache.region.GetLeader().GetStoreId() {
+	if region.GetLeader().GetStoreId() != g.LeaderStoreID {
 		return false
 	}
 	// Compare the Voters
@@ -364,6 +364,7 @@ func (m *Manager) InvalidCache(regionID uint64) {
 	}
 	if cache.isAffinity && cache.affinityVer == cache.groupInfo.AffinityVer {
 		cache.groupInfo.AffinityRegionCount--
+		m.affinityRegionCount--
 	}
 	delete(m.regions, regionID)
 	delete(cache.groupInfo.Regions, regionID)
