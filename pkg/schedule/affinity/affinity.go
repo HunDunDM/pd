@@ -424,6 +424,9 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 	for _, voter := range region.GetVoters() {
 		voterStoreIDs = append(voterStoreIDs, voter.GetStoreId())
 	}
+	if m.hasUnavailableStore(voterStoreIDs) {
+		return
+	}
 	m.Lock()
 	defer m.Unlock()
 	m.updateGroupEffectLocked(group.ID, group.affinityVer, leaderStoreID, voterStoreIDs)
@@ -863,6 +866,18 @@ func (m *Manager) setUnavailableStores(unavailableStores map[uint64]storeState) 
 				zap.Uint64("unavailable-store", unavailableStore))
 		}
 	}
+}
+
+func (m *Manager) hasUnavailableStore(storeIDs []uint64) bool {
+	m.RLock()
+	defer m.RUnlock()
+	for _, storeID := range storeIDs {
+		_, ok := m.unavailableStores[storeID]
+		if ok {
+			return true
+		}
+	}
+	return false
 }
 
 // keyRange represents a key range extracted from label rules.
