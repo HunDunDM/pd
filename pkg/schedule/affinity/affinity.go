@@ -248,10 +248,16 @@ func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, le
 	if !ok {
 		return
 	}
-	// Set Effect
-	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
+	// Becoming effective requires the affinityVer to match.
+	if leaderStoreID != 0 && groupInfo.AffinityVer != affinityVer {
+		return
+	}
+
+	if leaderStoreID == 0 {
+		// Set Effect = false
 		groupInfo.Effect = false
-	} else if groupInfo.AffinityVer == affinityVer {
+	} else {
+		// Set Effect = true. The affinityVer consistency has already been checked.
 		groupInfo.Effect = true
 		groupInfo.LeaderStoreID = leaderStoreID
 		groupInfo.VoterStoreIDs = append([]uint64(nil), voterStoreIDs...)

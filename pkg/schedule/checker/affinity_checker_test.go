@@ -1811,7 +1811,7 @@ func TestAffinityCheckerPreserveLearners(t *testing.T) {
 	tc.PutRegion(region)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Affinity group expects voters on [1, 2, 3] with leader on 2
 	// This should only transfer leader, not touch the learner on store 4
@@ -1864,7 +1864,7 @@ func TestAffinityCheckerPreserveLearnersWithPeerChange(t *testing.T) {
 	tc.PutRegion(region)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Affinity group expects voters on [1, 2, 3] with leader on 1
 	// This should replace voter 4 with 3, and preserve learner on store 5
@@ -1920,7 +1920,7 @@ func TestAffinityCheckerMultipleLearners(t *testing.T) {
 	tc.PutRegion(region)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Affinity group expects voters on [1, 2, 6] with leader on 2
 	// This should replace voter 3 with 6, transfer leader to 2, and preserve both learners on [4, 5]
