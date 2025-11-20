@@ -35,6 +35,13 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
+const (
+	// labelKey is the key for affinity group id in region label.
+	labelKey = "affinity_group"
+	// labelRuleIDPrefix is the prefix for affinity group label rules.
+	labelRuleIDPrefix = "affinity_group/"
+)
+
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
 // NOTE: This type is exported by HTTP API and persisted in storage. Please pay more attention when modifying it.
 type Group struct {
@@ -76,10 +83,22 @@ type GroupState struct {
 	RangeCount int `json:"range_count"`
 	// RegionCount indicates how many Regions are currently in the affinity state.
 	RegionCount int `json:"region_count"`
-	// RegionVotersReadyCount indicates how many Regions have all Voter peers in the correct stores.
-	RegionVotersReadyCount int `json:"region_voters_ready_count"`
-	// RegionLeadersReadyCount indicates how many Regions have their leader in the correct store.
-	RegionLeadersReadyCount int `json:"region_leaders_ready_count"`
+	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores.
+	AffinityRegionCount int `json:"affinity_region_count"`
+}
+
+// IsRegionAffinity checks whether the Region is in an affinity state.
+// nolint
+func (g *GroupState) IsRegionAffinity(region *core.RegionInfo) bool {
+	// TODO: check affinity
+	return false
+}
+
+type regionCache struct {
+	// nolint:unused
+	region      *core.RegionInfo
+	affinityVer uint64
+	groupInfo   *GroupInfo
 }
 
 // GroupInfo contains meta information and runtime statistics for the Group.
@@ -89,15 +108,27 @@ type GroupInfo struct {
 	// Effect parameter indicates whether the current constraint is in effect.
 	// Constraints are typically released when the store is in an abnormal state.
 	Effect bool
-	// AffinityRegionCount indicates how many Regions are currently in the affinity state.
+	// AffinityVer initializes at 1 and increments by 1 each time the Group changes.
+	AffinityVer uint64
+	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores. (AffinityVer equals).
 	AffinityRegionCount uint64
 
 	// nolint:unused
-	regions map[uint64]struct{}
+	Regions map[uint64]regionCache
 	// nolint:unused
 	// TODO: Consider separate modification support in the future (read-modify keyrange-write)
 	// Currently using label's internal multiple keyrange mechanism
 	labels *labeler.LabelRule
+}
+
+func newGroupInfo(group *Group, labels *labeler.LabelRule) *GroupInfo {
+	return &GroupInfo{
+		Group:       *group,
+		Effect:      false,
+		AffinityVer: 1,
+		Regions:     make(map[uint64]regionCache),
+		labels:      labels, // TODO: need to sync from labeler manager
+	}
 }
 
 // Manager is the manager of all affinity information.
@@ -107,7 +138,7 @@ type Manager struct {
 	storage          endpoint.AffinityStorage
 	initialized      bool
 	groups           map[string]*GroupInfo // {group_id} -> GroupInfo
-	regions          map[uint64]*GroupInfo // {region_id} -> GroupInfo
+	regions          map[uint64]regionCache
 	keyRanges        map[string][]keyRange // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
 	storeSetInformer core.StoreSetInformer
 	conf             config.SharedConfigProvider
@@ -123,7 +154,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		conf:             conf,
 		regionLabeler:    regionLabeler,
 		groups:           make(map[string]*GroupInfo),
-		regions:          make(map[uint64]*GroupInfo),
+		regions:          make(map[uint64]regionCache),
 		keyRanges:        make(map[string][]keyRange),
 	}
 }
@@ -143,7 +174,7 @@ func (m *Manager) Initialize() error {
 				zap.String("key", k),
 				zap.Error(errs.ErrLoadRule.Wrap(err)))
 		}
-		m.groups[group.ID] = &GroupInfo{Group: *group, Effect: true}
+		m.groups[group.ID] = newGroupInfo(group, nil)
 	})
 	if err != nil {
 		return err
@@ -161,6 +192,48 @@ func (m *Manager) Initialize() error {
 	m.startHealthCheckLoop()
 	log.Info("affinity manager initialized", zap.Int("group-count", len(m.groups)))
 	return nil
+}
+
+// InvalidCache invalidates the cache of the corresponding Region in the manager by its Region ID.
+func (m *Manager) InvalidCache(regionID uint64) {
+	m.RLock()
+	_, ok := m.regions[regionID]
+	m.RUnlock()
+	if !ok {
+		return
+	}
+
+	m.Lock()
+	defer m.Unlock()
+	cache, ok := m.regions[regionID]
+	if !ok {
+		return
+	}
+	if cache.affinityVer == cache.groupInfo.AffinityVer {
+		cache.groupInfo.AffinityRegionCount--
+	}
+	delete(m.regions, regionID)
+	delete(cache.groupInfo.Regions, regionID)
+}
+
+func (m *Manager) getRegionCached(region *core.RegionInfo) *regionCache {
+	m.RLock()
+	defer m.RUnlock()
+	cache, ok := m.regions[region.GetID()]
+	if ok && cache.affinityVer == cache.groupInfo.AffinityVer {
+		return &cache
+	}
+	return nil
+}
+
+// IsRegionCovered checks whether the Region’s key range is managed by any Group.
+func (m *Manager) IsRegionCovered(region *core.RegionInfo) bool {
+	cache := m.getRegionCached(region)
+	if cache != nil && region == cache.region {
+		return true
+	}
+	// TODO: use labeler check
+	return false
 }
 
 // IsInitialized returns whether the manager is initialized.
@@ -243,15 +316,8 @@ func (m *Manager) ValidateKeyRanges(ranges []KeyRangeInput) error {
 // This ensures consistent naming between label creation and deletion.
 // Format: "affinity_group/{group_id}"
 func GetLabelRuleID(groupID string) string {
-	return "affinity_group/" + groupID
+	return labelRuleIDPrefix + groupID
 }
-
-const (
-	// labelRuleIDPrefix is the prefix for affinity group label rules.
-	labelRuleIDPrefix = "affinity_group/"
-	// affinityLabelKey is the label key for affinity group.
-	affinityLabelKey = "affinity_group"
-)
 
 // parseAffinityGroupIDFromLabelRule parses the affinity group ID from the label rule.
 // It will return the group ID and a boolean indicating whether the label rule is an affinity label rule.
@@ -265,10 +331,10 @@ func parseAffinityGroupIDFromLabelRule(rule *labeler.LabelRule) (string, bool) {
 	if groupID == "" {
 		return "", false
 	}
-	// Double check the group ID from the label rule.
+	// Double-check the group ID from the label rule.
 	var groupIDFromLabel string
 	for _, label := range rule.Labels {
-		if label.Key == affinityLabelKey {
+		if label.Key == labelKey {
 			groupIDFromLabel = label.Value
 			break
 		}
@@ -302,18 +368,22 @@ func (m *Manager) SetRegionGroup(regionID uint64, groupID string) {
 		return
 	}
 
-	m.regions[regionID] = groupInfo
-	if groupInfo.regions != nil {
-		groupInfo.regions[regionID] = struct{}{}
+	cache := regionCache{
+		region:      nil,
+		affinityVer: groupInfo.AffinityVer,
+		groupInfo:   groupInfo,
 	}
+
+	m.regions[regionID] = cache
+	groupInfo.Regions[regionID] = cache
 }
 
 // GetRegionAffinityGroup returns the affinity group state for a region.
-func (m *Manager) GetRegionAffinityGroup(regionID uint64) *GroupState {
+func (m *Manager) GetRegionAffinityGroup(region *core.RegionInfo) *GroupState {
 	m.RLock()
 	defer m.RUnlock()
 
-	groupInfo := m.regions[regionID]
+	groupInfo := m.regions[region.GetID()].groupInfo
 	if groupInfo == nil {
 		return nil
 	}
@@ -405,7 +475,7 @@ func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 			if len(gwr.KeyRanges) > 0 {
 				labelRule := &labeler.LabelRule{
 					ID:       GetLabelRuleID(gwr.Group.ID),
-					Labels:   []labeler.RegionLabel{{Key: affinityLabelKey, Value: gwr.Group.ID}},
+					Labels:   []labeler.RegionLabel{{Key: labelKey, Value: gwr.Group.ID}},
 					RuleType: labeler.KeyRange,
 					Data:     gwr.KeyRanges,
 				}
@@ -432,12 +502,7 @@ func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 			info.labels = labelRule
 		} else {
 			// Create new group info
-			m.groups[gwr.Group.ID] = &GroupInfo{
-				Group:   *gwr.Group,
-				Effect:  true,
-				labels:  labelRule,
-				regions: make(map[uint64]struct{}), // TODO: load regions
-			}
+			m.groups[gwr.Group.ID] = newGroupInfo(gwr.Group, labelRule)
 		}
 
 		// Update key ranges cache for this group
@@ -488,8 +553,8 @@ func (m *Manager) DeleteAffinityGroup(id string) error {
 	// Step 4: Clean up regions map
 	// Remove all region entries that reference this group
 	var regionsToDelete []uint64
-	for regionID, groupInfo := range m.regions {
-		if groupInfo.ID == id {
+	for regionID, cache := range m.regions {
+		if cache.groupInfo.ID == id {
 			regionsToDelete = append(regionsToDelete, regionID)
 		}
 	}
@@ -842,7 +907,7 @@ func (m *Manager) IsRegionAffinity(region *core.RegionInfo) bool {
 	defer m.RUnlock()
 
 	// Get the affinity group for this region
-	groupInfo := m.regions[region.GetID()]
+	groupInfo := m.regions[region.GetID()].groupInfo
 	if groupInfo == nil {
 		// Region doesn't belong to any affinity group, return false
 		return false
