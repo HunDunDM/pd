@@ -276,6 +276,12 @@ func (m *Manager) IsInitialized() bool {
 	return m.initialized
 }
 
+func (m *Manager) IsAvailable() bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.initialized && len(m.groups) > 0
+}
+
 func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) {
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
@@ -416,7 +422,7 @@ func (m *Manager) getCache(region *core.RegionInfo) (*regionCache, *GroupState) 
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
 	// TODO: Improve the strategy.
-	if group == nil || group.Effect {
+	if group == nil || group.Effect || !m.IsAvailable() {
 		return
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
@@ -434,7 +440,7 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 
 // GetRegionAffinityGroupState returns the affinity group state and isAffinity for a region.
 func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo) (*GroupState, bool) {
-	if region == nil {
+	if region == nil || !m.IsAvailable() {
 		return nil, false
 	}
 	cache, group := m.getCache(region)
@@ -599,11 +605,14 @@ func (m *Manager) GetAffinityGroupState(id string) *GroupState {
 }
 
 // GetAllAffinityGroupStates returns all affinity groups.
-// TODO: it is a mock function now, need to implement the real logic.
 func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 	m.RLock()
 	defer m.RUnlock()
-	return nil
+	result := make([]*GroupState, 0, len(m.groups))
+	for _, group := range m.groups {
+		result = append(result, newGroupState(group))
+	}
+	return result
 }
 
 // GroupWithRanges represents a group with its associated key ranges.
@@ -614,6 +623,10 @@ type GroupWithRanges struct {
 
 // SaveAffinityGroups adds multiple affinity groups to storage and creates corresponding label rules.
 func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
+	if !m.IsInitialized() {
+		return errs.ErrAffinityDisabled
+	}
+
 	// Validate all groups first (without lock)
 	for _, gwr := range groupsWithRanges {
 		if err := m.AdjustGroup(gwr.Group); err != nil {
@@ -699,6 +712,10 @@ func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 
 // DeleteAffinityGroup deletes an affinity group by ID and removes its label rule.
 func (m *Manager) DeleteAffinityGroup(id string) error {
+	if !m.IsInitialized() {
+		return errs.ErrAffinityDisabled
+	}
+
 	m.Lock()
 	defer m.Unlock()
 
@@ -789,7 +806,7 @@ func (m *Manager) startAvailabilityCheckLoop() {
 
 // checkStoresAvailability checks the availability status of stores and invalidates groups with unavailable stores.
 func (m *Manager) checkStoresAvailability() {
-	if !m.IsInitialized() {
+	if !m.IsAvailable() {
 		return
 	}
 	unavailableStores := m.generateUnavailableStores()
