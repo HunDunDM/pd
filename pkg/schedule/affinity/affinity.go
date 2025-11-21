@@ -90,15 +90,6 @@ type Group struct {
 	// TODO: LearnerStoreIDs
 }
 
-// Clone returns a deep copy of the Group.
-// This is used to return copies from the cache, preventing race conditions.
-func (g *Group) Clone() *Group {
-	clone := *g
-	clone.VoterStoreIDs = append([]uint64(nil), g.VoterStoreIDs...)
-	// TODO: Clone LearnerStoreIDs when added
-	return &clone
-}
-
 func (g *Group) String() string {
 	b, _ := json.Marshal(g)
 	return string(b)
@@ -176,12 +167,13 @@ type GroupInfo struct {
 	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores. (AffinityVer equals).
 	AffinityRegionCount int
 
-	// nolint:unused
+	// Regions represents the cache of Regions.
 	Regions map[uint64]regionCache
-	// nolint:unused
 	// TODO: Consider separate modification support in the future (read-modify keyrange-write)
 	// Currently using label's internal multiple keyrange mechanism
 	labels *labeler.LabelRule
+	// RangeCount counts how many KeyRanges exist in the Label.
+	RangeCount int
 }
 
 // newGroupState creates a GroupState from the given GroupInfo.
@@ -195,7 +187,7 @@ func newGroupState(g *GroupInfo) *GroupState {
 			VoterStoreIDs:   append([]uint64(nil), g.VoterStoreIDs...),
 		},
 		Effect:              g.Effect,
-		RangeCount:          0, // TODO: len(labels)
+		RangeCount:          g.RangeCount,
 		RegionCount:         len(g.Regions),
 		AffinityRegionCount: g.AffinityRegionCount,
 		affinityVer:         g.AffinityVer,
@@ -309,6 +301,10 @@ func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, le
 }
 
 func (m *Manager) updateGroupLabelsLocked(groupID string, labels *labeler.LabelRule) {
+	rangeCount := 0
+	if ranges, ok := labels.Data.([]*labeler.KeyRangeRule); ok {
+		rangeCount = len(ranges)
+	}
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		groupInfo = &GroupInfo{
@@ -323,6 +319,7 @@ func (m *Manager) updateGroupLabelsLocked(groupID string, labels *labeler.LabelR
 			AffinityRegionCount: 0,
 			Regions:             make(map[uint64]regionCache),
 			labels:              labels,
+			RangeCount:          rangeCount,
 		}
 		m.groups[groupID] = groupInfo
 	} else {
@@ -332,6 +329,7 @@ func (m *Manager) updateGroupLabelsLocked(groupID string, labels *labeler.LabelR
 		groupInfo.AffinityVer++
 		// Set labels
 		groupInfo.labels = labels
+		groupInfo.RangeCount = rangeCount
 	}
 }
 
@@ -563,6 +561,7 @@ func parseAffinityGroupIDFromLabelRule(rule *labeler.LabelRule) (string, bool) {
 
 // GetGroups returns the internal groups map.
 // Used for testing only.
+// TODO: Move these tests.
 func (m *Manager) GetGroups() map[string]*GroupInfo {
 	m.RLock()
 	defer m.RUnlock()
@@ -958,7 +957,7 @@ func extractKeyRangesFromLabelRule(rule *labeler.LabelRule) ([]keyRange, error) 
 		return nil, nil
 	}
 
-	dataSlice, ok := rule.Data.([]any)
+	dataSlice, ok := rule.Data.([]any) // Fix it
 	if !ok {
 		return nil, errs.ErrAffinityGroupContent.FastGenByArgs("invalid label rule data format")
 	}
