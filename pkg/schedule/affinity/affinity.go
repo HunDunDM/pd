@@ -133,7 +133,7 @@ type regionCache struct {
 
 // IsRegionAffinity checks whether the Region is in an affinity state.
 func (g *GroupState) isRegionAffinity(region *core.RegionInfo, cache *regionCache) bool {
-	if region == nil {
+	if region == nil || !g.Effect {
 		return false
 	}
 
@@ -276,6 +276,7 @@ func (m *Manager) IsInitialized() bool {
 	return m.initialized
 }
 
+// IsAvailable checks that the Manager has been initialized and contains at least one Group.
 func (m *Manager) IsAvailable() bool {
 	m.RLock()
 	defer m.RUnlock()
