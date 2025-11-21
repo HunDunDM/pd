@@ -957,7 +957,7 @@ func extractKeyRangesFromLabelRule(rule *labeler.LabelRule) ([]keyRange, error) 
 		return nil, nil
 	}
 
-	dataSlice, ok := rule.Data.([]any) // Fix it
+	dataSlice, ok := rule.Data.([]any)
 	if !ok {
 		return nil, errs.ErrAffinityGroupContent.FastGenByArgs("invalid label rule data format")
 	}
