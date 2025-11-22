@@ -31,12 +31,15 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
-// RangeModification defines a range modification operation for a group.
-type RangeModification struct {
+// keyRange represents a key range extracted from label rules.
+type keyRange struct {
 	GroupID  string
 	StartKey []byte
 	EndKey   []byte
 }
+
+// GroupRangeModification defines a range modification operation for a group.
+type GroupRangeModification keyRange
 
 // GroupWithRanges represents a group with its associated key ranges.
 type GroupWithRanges struct {
@@ -98,9 +101,9 @@ func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 	for _, gwr := range groupsWithRanges {
 		for _, kr := range gwr.KeyRanges {
 			allNewRanges = append(allNewRanges, keyRange{
-				startKey: kr.StartKey,
-				endKey:   kr.EndKey,
-				groupID:  gwr.Group.ID,
+				StartKey: kr.StartKey,
+				EndKey:   kr.EndKey,
+				GroupID:  gwr.Group.ID,
 			})
 		}
 	}
@@ -163,9 +166,9 @@ func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 			ranges := make([]keyRange, len(gwr.KeyRanges))
 			for i, kr := range gwr.KeyRanges {
 				ranges[i] = keyRange{
-					startKey: kr.StartKey,
-					endKey:   kr.EndKey,
-					groupID:  gwr.Group.ID,
+					StartKey: kr.StartKey,
+					EndKey:   kr.EndKey,
+					GroupID:  gwr.Group.ID,
 				}
 			}
 			m.keyRanges[gwr.Group.ID] = ranges
@@ -227,7 +230,7 @@ func (m *Manager) DeleteAffinityGroup(id string, force bool) error {
 
 // BatchModifyGroupRanges batch modifies key ranges for multiple affinity groups.
 // Remove operations are executed before add operations to handle range migration scenarios.
-func (m *Manager) BatchModifyGroupRanges(addOps, removeOps []RangeModification) error {
+func (m *Manager) BatchModifyGroupRanges(addOps, removeOps []GroupRangeModification) error {
 	m.Lock()
 	defer m.Unlock()
 
@@ -235,10 +238,10 @@ func (m *Manager) BatchModifyGroupRanges(addOps, removeOps []RangeModification) 
 		return errors.New("region labeler is not available")
 	}
 
-	// Group operations by groupID
+	// Group operations by GroupID
 	type groupOps struct {
-		adds    []RangeModification
-		removes []RangeModification
+		adds    []GroupRangeModification
+		removes []GroupRangeModification
 	}
 	opsByGroup := make(map[string]*groupOps)
 
@@ -272,9 +275,9 @@ func (m *Manager) BatchModifyGroupRanges(addOps, removeOps []RangeModification) 
 		// Apply add operations and collect new ranges
 		for _, addOp := range ops.adds {
 			newRange := keyRange{
-				startKey: addOp.StartKey,
-				endKey:   addOp.EndKey,
-				groupID:  groupID,
+				StartKey: addOp.StartKey,
+				EndKey:   addOp.EndKey,
+				GroupID:  groupID,
 			}
 			currentRanges = append(currentRanges, newRange)
 			allNewRanges = append(allNewRanges, newRange)
@@ -323,7 +326,7 @@ func (m *Manager) getCurrentRanges(groupID string) ([]keyRange, error) {
 
 // applyRemoveOps filters out ranges that match remove operations.
 // Optimized with a map for O(n+m) complexity instead of O(n*m).
-func applyRemoveOps(currentRanges []keyRange, removes []RangeModification) []keyRange {
+func applyRemoveOps(currentRanges []keyRange, removes []GroupRangeModification) []keyRange {
 	if len(removes) == 0 {
 		return currentRanges
 	}
@@ -338,7 +341,7 @@ func applyRemoveOps(currentRanges []keyRange, removes []RangeModification) []key
 
 	var filtered []keyRange
 	for _, current := range currentRanges {
-		key := hex.EncodeToString(current.startKey) + "|" + hex.EncodeToString(current.endKey)
+		key := hex.EncodeToString(current.StartKey) + "|" + hex.EncodeToString(current.EndKey)
 		if _, found := removeSet[key]; !found {
 			filtered = append(filtered, current)
 		}
@@ -375,8 +378,8 @@ func (m *Manager) updateGroupRanges(groupID string, ranges []keyRange) error {
 	var newData []any
 	for _, kr := range ranges {
 		newData = append(newData, map[string]any{
-			"start_key": hex.EncodeToString(kr.startKey),
-			"end_key":   hex.EncodeToString(kr.endKey),
+			"start_key": hex.EncodeToString(kr.StartKey),
+			"end_key":   hex.EncodeToString(kr.EndKey),
 		})
 	}
 
@@ -512,13 +515,6 @@ func (m *Manager) UpdateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 	return newGroupState(groupInfo), nil
 }
 
-// keyRange represents a key range extracted from label rules.
-type keyRange struct {
-	startKey []byte
-	endKey   []byte
-	groupID  string
-}
-
 // parseKeyRangesFromData parses key ranges from []*labeler.KeyRangeRule format (from label rule).
 func parseKeyRangesFromData(data []*labeler.KeyRangeRule, groupID string) ([]keyRange, error) {
 	if len(data) == 0 {
@@ -540,9 +536,9 @@ func parseKeyRangesFromData(data []*labeler.KeyRangeRule, groupID string) ([]key
 			return nil, err
 		}
 		ranges = append(ranges, keyRange{
-			startKey: startKey,
-			endKey:   endKey,
-			groupID:  groupID,
+			StartKey: startKey,
+			EndKey:   endKey,
+			GroupID:  groupID,
 		})
 	}
 	return ranges, nil
@@ -612,12 +608,12 @@ func (m *Manager) validateNoKeyRangeOverlap(newRanges []keyRange) error {
 	for i := range newRanges {
 		for j := i + 1; j < len(newRanges); j++ {
 			if checkKeyRangesOverlap(
-				newRanges[i].startKey, newRanges[i].endKey,
-				newRanges[j].startKey, newRanges[j].endKey,
+				newRanges[i].StartKey, newRanges[i].EndKey,
+				newRanges[j].StartKey, newRanges[j].EndKey,
 			) {
 				return errs.ErrAffinityGroupContent.FastGenByArgs(
 					"key ranges overlap within the same request: group " +
-						newRanges[i].groupID + " and " + newRanges[j].groupID)
+						newRanges[i].GroupID + " and " + newRanges[j].GroupID)
 			}
 		}
 	}
@@ -627,18 +623,18 @@ func (m *Manager) validateNoKeyRangeOverlap(newRanges []keyRange) error {
 	for _, newRange := range newRanges {
 		for groupID, existingRanges := range m.keyRanges {
 			// Skip if it's the same group (updating existing group)
-			if newRange.groupID == groupID {
+			if newRange.GroupID == groupID {
 				continue
 			}
 
 			for _, existingRange := range existingRanges {
 				if checkKeyRangesOverlap(
-					newRange.startKey, newRange.endKey,
-					existingRange.startKey, existingRange.endKey,
+					newRange.StartKey, newRange.EndKey,
+					existingRange.StartKey, existingRange.EndKey,
 				) {
 					return errs.ErrAffinityGroupContent.FastGenByArgs(
 						"key range overlaps with existing group: new group " +
-							newRange.groupID + " overlaps with group " + existingRange.groupID)
+							newRange.GroupID + " overlaps with group " + existingRange.GroupID)
 				}
 			}
 		}
@@ -695,12 +691,12 @@ func (m *Manager) loadRegionLabel() error {
 	for i := range allRanges {
 		for j := i + 1; j < len(allRanges); j++ {
 			if checkKeyRangesOverlap(
-				allRanges[i].startKey, allRanges[i].endKey,
-				allRanges[j].startKey, allRanges[j].endKey,
+				allRanges[i].StartKey, allRanges[i].EndKey,
+				allRanges[j].StartKey, allRanges[j].EndKey,
 			) {
 				return errs.ErrAffinityGroupContent.FastGenByArgs(
 					"found overlapping key ranges during rebuild: group " +
-						allRanges[i].groupID + " overlaps with group " + allRanges[j].groupID)
+						allRanges[i].GroupID + " overlaps with group " + allRanges[j].GroupID)
 			}
 		}
 	}

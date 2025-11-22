@@ -56,16 +56,16 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 
 	// Test 1: Non-overlapping ranges should succeed
 	keyRanges1 := []keyRange{
-		{startKey: []byte("a"), endKey: []byte("b"), groupID: "group1"},
-		{startKey: []byte("c"), endKey: []byte("d"), groupID: "group1"},
+		{StartKey: []byte("a"), EndKey: []byte("b"), GroupID: "group1"},
+		{StartKey: []byte("c"), EndKey: []byte("d"), GroupID: "group1"},
 	}
 	err = validate(keyRanges1)
 	re.NoError(err, "Non-overlapping ranges should pass validation")
 
 	// Test 2: Overlapping ranges within same request should fail
 	keyRanges2 := []keyRange{
-		{startKey: []byte("a"), endKey: []byte("c"), groupID: "group1"},
-		{startKey: []byte("b"), endKey: []byte("d"), groupID: "group1"},
+		{StartKey: []byte("a"), EndKey: []byte("c"), GroupID: "group1"},
+		{StartKey: []byte("b"), EndKey: []byte("d"), GroupID: "group1"},
 	}
 	err = validate(keyRanges2)
 	re.Error(err, "Overlapping ranges should fail validation")
@@ -73,8 +73,8 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 
 	// Test 3: Adjacent ranges (not overlapping) should succeed
 	keyRanges3 := []keyRange{
-		{startKey: []byte("a"), endKey: []byte("b"), groupID: "group1"},
-		{startKey: []byte("b"), endKey: []byte("c"), groupID: "group1"},
+		{StartKey: []byte("a"), EndKey: []byte("b"), GroupID: "group1"},
+		{StartKey: []byte("b"), EndKey: []byte("c"), GroupID: "group1"},
 	}
 	err = validate(keyRanges3)
 	re.NoError(err, "Adjacent ranges should pass validation")
@@ -193,9 +193,9 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 
 	// Remove all ranges and ensure cache/label are cleared.
 	ranges := []keyRange{{
-		startKey: []byte{0x00},
-		endKey:   []byte{0x10},
-		groupID:  "persist",
+		StartKey: []byte{0x00},
+		EndKey:   []byte{0x10},
+		GroupID:  "persist",
 	}}
 	re.NoError(manager2.updateGroupRanges("persist", ranges))
 	re.NoError(manager2.updateGroupRanges("persist", nil))
