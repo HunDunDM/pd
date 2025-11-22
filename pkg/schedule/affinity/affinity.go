@@ -114,7 +114,7 @@ type GroupState struct {
 	affinityVer uint64
 	// groupInfoPtr is a pointer to the original information.
 	// It is used only for pointer comparison and should not access any internal data.
-	groupInfoPtr *GroupInfo
+	groupInfoPtr *runtimeGroupInfo
 }
 
 // RangeModification defines a range modification operation for a group.
@@ -126,7 +126,7 @@ type RangeModification struct {
 
 type regionCache struct {
 	region      *core.RegionInfo
-	groupInfo   *GroupInfo
+	groupInfo   *runtimeGroupInfo
 	affinityVer uint64
 	isAffinity  bool
 }
@@ -164,8 +164,8 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo, cache *regionCach
 	return true
 }
 
-// GroupInfo contains meta information and runtime statistics for the Group.
-type GroupInfo struct {
+// runtimeGroupInfo contains meta information and runtime statistics for the Group.
+type runtimeGroupInfo struct {
 	Group
 
 	// Effect parameter indicates whether the current constraint is in effect.
@@ -185,9 +185,9 @@ type GroupInfo struct {
 	RangeCount int
 }
 
-// newGroupState creates a GroupState from the given GroupInfo.
-// GroupInfo may need to be accessed under a Lock.
-func newGroupState(g *GroupInfo) *GroupState {
+// newGroupState creates a GroupState from the given runtimeGroupInfo.
+// runtimeGroupInfo may need to be accessed under a Lock.
+func newGroupState(g *runtimeGroupInfo) *GroupState {
 	return &GroupState{
 		Group: Group{
 			ID:              g.ID,
@@ -215,7 +215,7 @@ type Manager struct {
 
 	initialized         bool
 	affinityRegionCount int
-	groups              map[string]*GroupInfo // {group_id} -> GroupInfo
+	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache
 	keyRanges           map[string][]keyRange // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
 	unavailableStores   map[uint64]storeState
@@ -229,7 +229,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		storeSetInformer: storeSetInformer,
 		conf:             conf,
 		regionLabeler:    regionLabeler,
-		groups:           make(map[string]*GroupInfo),
+		groups:           make(map[string]*runtimeGroupInfo),
 		regions:          make(map[uint64]regionCache),
 		keyRanges:        make(map[string][]keyRange),
 	}
@@ -318,7 +318,7 @@ func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.
 	}
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
-		groupInfo = &GroupInfo{
+		groupInfo = &runtimeGroupInfo{
 			Group: Group{
 				ID:              groupID,
 				CreateTimestamp: uint64(time.Now().Unix()),
@@ -345,14 +345,14 @@ func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.
 }
 
 func (m *Manager) deleteGroupLocked(groupID string) {
-	group, ok := m.groups[groupID]
+	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		return
 	}
 
 	delete(m.groups, groupID)
-	m.affinityRegionCount -= group.AffinityRegionCount
-	for regionID := range group.Regions {
+	m.affinityRegionCount -= groupInfo.AffinityRegionCount
+	for regionID := range groupInfo.Regions {
 		delete(m.regions, regionID)
 	}
 	delete(m.keyRanges, groupID)
@@ -556,7 +556,7 @@ func parseAffinityGroupIDFromLabelRule(rule *labeler.LabelRule) (string, bool) {
 // GetGroups returns the internal groups map.
 // Used for testing only.
 // TODO: Move these tests.
-func (m *Manager) GetGroups() map[string]*GroupInfo {
+func (m *Manager) GetGroups() map[string]*runtimeGroupInfo {
 	m.RLock()
 	defer m.RUnlock()
 	return m.groups
@@ -591,9 +591,9 @@ func (m *Manager) SetRegionGroup(regionID uint64, groupID string) {
 func (m *Manager) GetAffinityGroupState(id string) *GroupState {
 	m.RLock()
 	defer m.RUnlock()
-	group, ok := m.groups[id]
+	groupInfo, ok := m.groups[id]
 	if ok {
-		return newGroupState(group)
+		return newGroupState(groupInfo)
 	}
 	return nil
 }
@@ -603,8 +603,8 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 	m.RLock()
 	defer m.RUnlock()
 	result := make([]*GroupState, 0, len(m.groups))
-	for _, group := range m.groups {
-		result = append(result, newGroupState(group))
+	for _, groupInfo := range m.groups {
+		result = append(result, newGroupState(groupInfo))
 	}
 	return result
 }
@@ -1151,13 +1151,13 @@ func (m *Manager) setUnavailableStores(unavailableStores map[uint64]storeState) 
 		return
 	}
 	// Update groupInfo
-	for _, group := range m.groups {
-		if !group.Effect {
+	for _, groupInfo := range m.groups {
+		if !groupInfo.Effect {
 			continue
 		}
 		unavailableStore := uint64(0)
-		_, hasUnavailableStore := unavailableStores[group.LeaderStoreID]
-		for _, storeID := range group.VoterStoreIDs {
+		_, hasUnavailableStore := unavailableStores[groupInfo.LeaderStoreID]
+		for _, storeID := range groupInfo.VoterStoreIDs {
 			if !hasUnavailableStore {
 				_, hasUnavailableStore = unavailableStores[storeID]
 				if hasUnavailableStore {
@@ -1166,9 +1166,9 @@ func (m *Manager) setUnavailableStores(unavailableStores map[uint64]storeState) 
 			}
 		}
 		if hasUnavailableStore {
-			m.updateGroupEffectLocked(group.ID, 0, 0, nil)
+			m.updateGroupEffectLocked(groupInfo.ID, 0, 0, nil)
 			log.Warn("affinity group invalidated due to unavailable stores",
-				zap.String("group-id", group.ID),
+				zap.String("group-id", groupInfo.ID),
 				zap.Uint64("unavailable-store", unavailableStore))
 		}
 	}
