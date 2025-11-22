@@ -180,7 +180,7 @@ type GroupInfo struct {
 	Regions map[uint64]regionCache
 	// TODO: Consider separate modification support in the future (read-modify keyrange-write)
 	// Currently using label's internal multiple keyrange mechanism
-	labels *labeler.LabelRule
+	LabelRule *labeler.LabelRule
 	// RangeCount counts how many KeyRanges exist in the Label.
 	RangeCount int
 }
@@ -250,7 +250,7 @@ func (m *Manager) Initialize() error {
 				zap.String("key", k),
 				zap.Error(errs.ErrLoadRule.Wrap(err)))
 		}
-		m.updateGroupLabelsLocked(group.ID, nil)
+		m.updateGroupLabelRuleLocked(group.ID, nil)
 	})
 	if err != nil {
 		return err
@@ -309,10 +309,10 @@ func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, le
 	groupInfo.AffinityVer++
 }
 
-func (m *Manager) updateGroupLabelsLocked(groupID string, labels *labeler.LabelRule) {
+func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.LabelRule) {
 	rangeCount := 0
-	if labels != nil {
-		if ranges, ok := labels.Data.([]*labeler.KeyRangeRule); ok {
+	if labelRule != nil {
+		if ranges, ok := labelRule.Data.([]*labeler.KeyRangeRule); ok {
 			rangeCount = len(ranges)
 		}
 	}
@@ -329,7 +329,7 @@ func (m *Manager) updateGroupLabelsLocked(groupID string, labels *labeler.LabelR
 			AffinityVer:         1,
 			AffinityRegionCount: 0,
 			Regions:             make(map[uint64]regionCache),
-			labels:              labels,
+			LabelRule:           labelRule,
 			RangeCount:          rangeCount,
 		}
 		m.groups[groupID] = groupInfo
@@ -338,8 +338,8 @@ func (m *Manager) updateGroupLabelsLocked(groupID string, labels *labeler.LabelR
 		m.affinityRegionCount -= groupInfo.AffinityRegionCount
 		groupInfo.AffinityRegionCount = 0
 		groupInfo.AffinityVer++
-		// Set labels
-		groupInfo.labels = labels
+		// Set LabelRule
+		groupInfo.LabelRule = labelRule
 		groupInfo.RangeCount = rangeCount
 	}
 }
@@ -695,7 +695,7 @@ func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 	// Step 3: Update in-memory cache with label rule pointers and key ranges
 	for _, gwr := range groupsWithRanges {
 		labelRule := labelRules[gwr.Group.ID]
-		m.updateGroupLabelsLocked(gwr.Group.ID, labelRule)
+		m.updateGroupLabelRuleLocked(gwr.Group.ID, labelRule)
 		// Update key ranges cache for this group
 		if len(gwr.KeyRanges) > 0 {
 			ranges := make([]keyRange, len(gwr.KeyRanges))
@@ -898,7 +898,7 @@ func (m *Manager) updateGroupRanges(groupID string, ranges []keyRange) error {
 		}
 		delete(m.keyRanges, groupID)
 		if groupInfo, ok := m.groups[groupID]; ok {
-			groupInfo.labels = nil
+			groupInfo.LabelRule = nil
 			groupInfo.RangeCount = 0
 			groupInfo.AffinityRegionCount = 0
 			m.affinityRegionCount -= groupInfo.AffinityRegionCount
@@ -1359,7 +1359,7 @@ func (m *Manager) loadRegionLabel() error {
 				zap.String("group-id", groupID),
 				zap.String("rule-id", rule.ID))
 		} else {
-			m.updateGroupLabelsLocked(groupID, rule)
+			m.updateGroupLabelRuleLocked(groupID, rule)
 		}
 
 		return true
