@@ -20,6 +20,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
@@ -185,4 +186,16 @@ func (m *Manager) AdjustGroup(g *Group) error {
 func (m *Manager) IsRegionAffinity(region *core.RegionInfo) bool {
 	_, isAffinity := m.GetRegionAffinityGroupState(region)
 	return isAffinity
+}
+
+// GroupKeyRange represents a key range extracted from label rules.
+type GroupKeyRange struct {
+	keyutil.KeyRange
+	GroupID string
+}
+
+// GroupWithRanges represents a group with its associated key ranges.
+type GroupWithRanges struct {
+	Group     *Group
+	KeyRanges []keyutil.KeyRange
 }

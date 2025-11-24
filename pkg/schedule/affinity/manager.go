@@ -58,7 +58,7 @@ type Manager struct {
 	affinityRegionCount int
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache
-	keyRanges           map[string][]keyRange // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
+	keyRanges           map[string][]GroupKeyRange // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
 	unavailableStores   map[uint64]storeState
 }
 
@@ -72,7 +72,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		regionLabeler:    regionLabeler,
 		groups:           make(map[string]*runtimeGroupInfo),
 		regions:          make(map[uint64]regionCache),
-		keyRanges:        make(map[string][]keyRange),
+		keyRanges:        make(map[string][]GroupKeyRange),
 	}
 }
 

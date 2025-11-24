@@ -48,33 +48,33 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 	err := manager.Initialize()
 	re.NoError(err)
 
-	validate := func(ranges []keyRange) error {
+	validate := func(ranges []GroupKeyRange) error {
 		manager.Lock()
 		defer manager.Unlock()
 		return manager.validateNoKeyRangeOverlap(ranges)
 	}
 
 	// Test 1: Non-overlapping ranges should succeed
-	keyRanges1 := []keyRange{
-		{StartKey: []byte("a"), EndKey: []byte("b"), GroupID: "group1"},
-		{StartKey: []byte("c"), EndKey: []byte("d"), GroupID: "group1"},
+	keyRanges1 := []GroupKeyRange{
+		{KeyRange: keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}, GroupID: "group1"},
+		{KeyRange: keyutil.KeyRange{StartKey: []byte("c"), EndKey: []byte("d")}, GroupID: "group1"},
 	}
 	err = validate(keyRanges1)
 	re.NoError(err, "Non-overlapping ranges should pass validation")
 
 	// Test 2: Overlapping ranges within same request should fail
-	keyRanges2 := []keyRange{
-		{StartKey: []byte("a"), EndKey: []byte("c"), GroupID: "group1"},
-		{StartKey: []byte("b"), EndKey: []byte("d"), GroupID: "group1"},
+	keyRanges2 := []GroupKeyRange{
+		{KeyRange: keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("c")}, GroupID: "group1"},
+		{KeyRange: keyutil.KeyRange{StartKey: []byte("b"), EndKey: []byte("d")}, GroupID: "group1"},
 	}
 	err = validate(keyRanges2)
 	re.Error(err, "Overlapping ranges should fail validation")
 	re.Contains(err.Error(), "overlap")
 
 	// Test 3: Adjacent ranges (not overlapping) should succeed
-	keyRanges3 := []keyRange{
-		{StartKey: []byte("a"), EndKey: []byte("b"), GroupID: "group1"},
-		{StartKey: []byte("b"), EndKey: []byte("c"), GroupID: "group1"},
+	keyRanges3 := []GroupKeyRange{
+		{KeyRange: keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}, GroupID: "group1"},
+		{KeyRange: keyutil.KeyRange{StartKey: []byte("b"), EndKey: []byte("c")}, GroupID: "group1"},
 	}
 	err = validate(keyRanges3)
 	re.NoError(err, "Adjacent ranges should pass validation")
@@ -192,10 +192,12 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	re.Equal(1, state2.RangeCount)
 
 	// Remove all ranges and ensure cache/label are cleared.
-	ranges := []keyRange{{
-		StartKey: []byte{0x00},
-		EndKey:   []byte{0x10},
-		GroupID:  "persist",
+	ranges := []GroupKeyRange{{
+		KeyRange: keyutil.KeyRange{
+			StartKey: []byte{0x00},
+			EndKey:   []byte{0x10},
+		},
+		GroupID: "persist",
 	}}
 	re.NoError(manager2.updateGroupRanges("persist", ranges))
 	re.NoError(manager2.updateGroupRanges("persist", nil))
