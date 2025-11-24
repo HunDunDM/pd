@@ -31,6 +31,11 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
+const (
+	// labelRuleIDPrefix is the prefix for affinity group label rules.
+	labelRuleIDPrefix = "affinity_group/"
+)
+
 // GetLabelRuleID returns the label rule ID for an affinity group.
 // This ensures consistent naming between label creation and deletion.
 // Format: "affinity_group/{group_id}"
@@ -105,34 +110,32 @@ func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 
 	// Step 2: Create label rules for each group
 	labelRules := make(map[string]*labeler.LabelRule)
-	if m.regionLabeler != nil {
-		for _, gwr := range groupsWithRanges {
-			if len(gwr.KeyRanges) > 0 {
-				// Convert byte slices to hex-encoded label rule data
-				var labelData []any
-				for _, kr := range gwr.KeyRanges {
-					labelData = append(labelData, map[string]any{
-						"start_key": hex.EncodeToString(kr.StartKey),
-						"end_key":   hex.EncodeToString(kr.EndKey),
-					})
-				}
-
-				labelRule := &labeler.LabelRule{
-					ID:       GetLabelRuleID(gwr.Group.ID),
-					Labels:   []labeler.RegionLabel{{Key: labelKey, Value: gwr.Group.ID}},
-					RuleType: labeler.KeyRange,
-					Data:     labelData,
-				}
-				if err := m.regionLabeler.SetLabelRule(labelRule); err != nil {
-					log.Error("failed to create label rule",
-						zap.String("failed-group-id", gwr.Group.ID),
-						zap.Int("total-groups", len(groupsWithRanges)),
-						zap.Error(err))
-					// TODO: rollback newly created groups
-					return err
-				}
-				labelRules[gwr.Group.ID] = labelRule
+	for _, gwr := range groupsWithRanges {
+		if len(gwr.KeyRanges) > 0 {
+			// Convert byte slices to hex-encoded label rule data
+			var labelData []any
+			for _, kr := range gwr.KeyRanges {
+				labelData = append(labelData, map[string]any{
+					"start_key": hex.EncodeToString(kr.StartKey),
+					"end_key":   hex.EncodeToString(kr.EndKey),
+				})
 			}
+
+			labelRule := &labeler.LabelRule{
+				ID:       GetLabelRuleID(gwr.Group.ID),
+				Labels:   []labeler.RegionLabel{{Key: labelKey, Value: gwr.Group.ID}},
+				RuleType: labeler.KeyRange,
+				Data:     labelData,
+			}
+			if err := m.regionLabeler.SetLabelRule(labelRule); err != nil {
+				log.Error("failed to create label rule",
+					zap.String("failed-group-id", gwr.Group.ID),
+					zap.Int("total-groups", len(groupsWithRanges)),
+					zap.Error(err))
+				// TODO: rollback newly created groups
+				return err
+			}
+			labelRules[gwr.Group.ID] = labelRule
 		}
 	}
 
@@ -184,15 +187,13 @@ func (m *Manager) DeleteAffinityGroup(id string, force bool) error {
 	}
 
 	// Step 2: Delete the corresponding label rule
-	if m.regionLabeler != nil {
-		labelRuleID := GetLabelRuleID(id)
-		if err := m.regionLabeler.DeleteLabelRule(labelRuleID); err != nil {
-			log.Warn("failed to delete label rule for affinity group",
-				zap.String("group-id", id),
-				zap.String("label-rule-id", labelRuleID),
-				zap.Error(err))
-			// Don't return error here - the group is already deleted from storage
-		}
+	labelRuleID := GetLabelRuleID(id)
+	if err = m.regionLabeler.DeleteLabelRule(labelRuleID); err != nil {
+		log.Warn("failed to delete label rule for affinity group",
+			zap.String("group-id", id),
+			zap.String("label-rule-id", labelRuleID),
+			zap.Error(err))
+		// Don't return error here - the group is already deleted from storage
 	}
 
 	// Step 3: Delete key ranges cache and regions map
@@ -208,11 +209,6 @@ func (m *Manager) DeleteAffinityGroup(id string, force bool) error {
 func (m *Manager) BatchModifyGroupRanges(addOps, removeOps []GroupKeyRange) error {
 	m.Lock()
 	defer m.Unlock()
-
-	if m.regionLabeler == nil {
-		return errors.New("region labeler is not available")
-	}
-
 	// Group operations by GroupID
 	type groupOps struct {
 		adds    []GroupKeyRange
@@ -427,14 +423,12 @@ func (m *Manager) BatchDeleteAffinityGroups(ids []string, force bool) error {
 	}
 
 	// Step 2: delete label rules.
-	if m.regionLabeler != nil {
-		for _, id := range toDelete {
-			if err := m.regionLabeler.DeleteLabelRule(GetLabelRuleID(id)); err != nil {
-				log.Warn("failed to delete label rule for affinity group",
-					zap.String("group-id", id),
-					zap.Error(err))
-				// TODO: Don't return error here - the group is already deleted from storage
-			}
+	for _, id := range toDelete {
+		if err := m.regionLabeler.DeleteLabelRule(GetLabelRuleID(id)); err != nil {
+			log.Warn("failed to delete label rule for affinity group",
+				zap.String("group-id", id),
+				zap.Error(err))
+			// TODO: Don't return error here - the group is already deleted from storage
 		}
 	}
 
@@ -618,10 +612,6 @@ func (m *Manager) validateNoKeyRangeOverlap(newRanges []GroupKeyRange) error {
 // loadRegionLabel rebuilds the mapping between groups and label rules after restart.
 // It should be called with the manager lock held.
 func (m *Manager) loadRegionLabel() error {
-	if m.regionLabeler == nil {
-		return nil
-	}
-
 	// Collect all key ranges from label rules and populate in-memory cache
 	var allRanges []GroupKeyRange
 

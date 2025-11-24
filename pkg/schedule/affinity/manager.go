@@ -16,7 +16,6 @@ package affinity
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"go.uber.org/zap"
@@ -34,8 +33,6 @@ import (
 const (
 	// labelKey is the key for affinity group id in region label.
 	labelKey = "affinity_group"
-	// labelRuleIDPrefix is the prefix for affinity group label rules.
-	labelRuleIDPrefix = "affinity_group/"
 )
 
 type regionCache struct {
@@ -53,6 +50,7 @@ type Manager struct {
 	storeSetInformer core.StoreSetInformer
 	conf             config.SharedConfigProvider
 	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
+	infoSyncer       *infoSyncer
 
 	affinityRegionCount int
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
@@ -67,14 +65,17 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		return nil, errs.ErrAffinityDisabled
 	}
 	m := &Manager{
-		ctx:              ctx,
-		storage:          storage,
-		storeSetInformer: storeSetInformer,
-		conf:             conf,
-		regionLabeler:    regionLabeler,
-		groups:           make(map[string]*runtimeGroupInfo),
-		regions:          make(map[uint64]regionCache),
-		keyRanges:        make(map[string][]GroupKeyRange),
+		ctx:                 ctx,
+		storage:             storage,
+		storeSetInformer:    storeSetInformer,
+		conf:                conf,
+		regionLabeler:       regionLabeler,
+		infoSyncer:          newInfoSyncer(ctx, storage, regionLabeler),
+		affinityRegionCount: 0,
+		groups:              make(map[string]*runtimeGroupInfo),
+		regions:             make(map[uint64]regionCache),
+		keyRanges:           make(map[string][]GroupKeyRange),
+		unavailableStores:   make(map[uint64]storeState),
 	}
 	if err := m.initialize(); err != nil {
 		return nil, err
@@ -86,26 +87,15 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 func (m *Manager) initialize() error {
 	m.Lock()
 	defer m.Unlock()
-
-	err := m.storage.LoadAllAffinityGroups(func(k string, v string) {
-		group := &Group{}
-		if err := json.Unmarshal([]byte(v), group); err != nil {
-			log.Error("failed to unmarshal affinity group, skipping",
-				zap.String("key", k),
-				zap.Error(errs.ErrLoadRule.Wrap(err)))
-		}
-		m.updateGroupLabelRuleLocked(group.ID, nil)
-	})
-	if err != nil {
+	if err := m.infoSyncer.Initialize(m.initGroupLocked); err != nil {
+		log.Error("init group info syncer failed", zap.Error(err))
 		return err
 	}
 
 	// load region labels
-	if m.regionLabeler != nil {
-		if err := m.loadRegionLabel(); err != nil {
-			log.Error("failed to rebuild group-label mapping", zap.Error(err))
-			return err
-		}
+	if err := m.loadRegionLabel(); err != nil {
+		log.Error("failed to rebuild group-label mapping", zap.Error(err))
+		return err
 	}
 
 	m.startAvailabilityCheckLoop()
@@ -118,6 +108,27 @@ func (m *Manager) IsAvailable() bool {
 	m.RLock()
 	defer m.RUnlock()
 	return len(m.groups) > 0
+}
+
+func (m *Manager) initGroupLocked(group *Group) {
+	if _, ok := m.groups[group.ID]; ok {
+		log.Error("group already initialized", zap.String("group-id", group.ID))
+		return
+	}
+	m.groups[group.ID] = &runtimeGroupInfo{
+		Group: Group{
+			ID:              group.ID,
+			CreateTimestamp: group.CreateTimestamp,
+			LeaderStoreID:   group.LeaderStoreID,
+			VoterStoreIDs:   append([]uint64(nil), group.VoterStoreIDs...),
+		},
+		Effect:              false, // TODO: observation status
+		AffinityVer:         1,
+		AffinityRegionCount: 0,
+		Regions:             make(map[uint64]regionCache),
+		LabelRule:           nil,
+		RangeCount:          0,
+	}
 }
 
 func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) {
@@ -271,10 +282,7 @@ func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo) (*GroupSt
 	}
 	cache, group := m.getCache(region)
 	if cache == nil || group == nil || region != cache.region {
-		var groupID string
-		if m.regionLabeler != nil {
-			groupID = m.regionLabeler.GetRegionLabel(region, labelKey)
-		}
+		groupID := m.regionLabeler.GetRegionLabel(region, labelKey)
 		if groupID != "" {
 			group = m.GetAffinityGroupState(groupID)
 		}
