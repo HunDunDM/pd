@@ -44,8 +44,7 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 	conf := mockconfig.NewTestOptions()
 
 	// Create manager without region labeler for basic validation testing
-	manager := NewManager(ctx, store, storeInfos, conf, nil)
-	err := manager.Initialize()
+	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
 	re.NoError(err)
 
 	validate := func(ranges []GroupKeyRange) error {
@@ -102,8 +101,7 @@ func TestKeyRangeOverlapRebuild(t *testing.T) {
 
 	conf := mockconfig.NewTestOptions()
 
-	manager := NewManager(ctx, store, storeInfos, conf, nil)
-	err := manager.Initialize()
+	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
 	re.NoError(err)
 
 	// Create two groups without key ranges for basic testing
@@ -131,8 +129,7 @@ func TestKeyRangeOverlapRebuild(t *testing.T) {
 	re.True(manager.IsGroupExist("group2"))
 
 	// Create a new manager to simulate restart
-	manager2 := NewManager(ctx, store, storeInfos, conf, nil)
-	err = manager2.Initialize()
+	manager2, err := NewManager(ctx, store, storeInfos, conf, nil)
 	re.NoError(err)
 
 	// Verify groups were loaded from storage
@@ -165,8 +162,8 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 	re.NoError(err)
 
-	manager := NewManager(ctx, store, storeInfos, conf, regionLabeler)
-	re.NoError(manager.Initialize())
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
 
 	gwr := GroupWithRanges{
 		Group: &Group{
@@ -185,8 +182,8 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	re.NotNil(regionLabeler.GetLabelRule(GetLabelRuleID("persist")))
 
 	// Reload manager to verify persistence and loadRegionLabel integration.
-	manager2 := NewManager(ctx, store, storeInfos, conf, regionLabeler)
-	re.NoError(manager2.Initialize())
+	manager2, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
 	state2 := manager2.GetAffinityGroupState("persist")
 	re.NotNil(state2)
 	re.Equal(1, state2.RangeCount)
@@ -226,8 +223,7 @@ func TestLabelRuleIntegration(t *testing.T) {
 	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 	re.NoError(err)
 
-	manager := NewManager(ctx, store, storeInfos, conf, regionLabeler)
-	err = manager.Initialize()
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
 	// Test: Group with no key ranges should not create label rule

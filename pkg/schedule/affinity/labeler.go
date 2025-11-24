@@ -66,10 +66,6 @@ func parseAffinityGroupIDFromLabelRule(rule *labeler.LabelRule) (string, bool) {
 
 // SaveAffinityGroups adds multiple affinity groups to storage and creates corresponding label rules.
 func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
-	if !m.IsInitialized() {
-		return errs.ErrAffinityDisabled
-	}
-
 	// Validate all groups first (without lock)
 	for _, gwr := range groupsWithRanges {
 		if err := m.AdjustGroup(gwr.Group); err != nil {
@@ -168,9 +164,6 @@ func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 // DeleteAffinityGroup deletes an affinity group by ID and removes its label rule.
 // If force is false and the group has key ranges, it returns an error.
 func (m *Manager) DeleteAffinityGroup(id string, force bool) error {
-	if !m.IsInitialized() {
-		return errs.ErrAffinityDisabled
-	}
 	m.Lock()
 	defer m.Unlock()
 

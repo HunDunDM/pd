@@ -54,7 +54,6 @@ type Manager struct {
 	conf             config.SharedConfigProvider
 	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
 
-	initialized         bool
 	affinityRegionCount int
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache
@@ -63,8 +62,11 @@ type Manager struct {
 }
 
 // NewManager creates a new affinity Manager.
-func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfigProvider, regionLabeler *labeler.RegionLabeler) *Manager {
-	return &Manager{
+func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfigProvider, regionLabeler *labeler.RegionLabeler) (*Manager, error) {
+	if regionLabeler == nil {
+		return nil, errs.ErrAffinityDisabled
+	}
+	m := &Manager{
 		ctx:              ctx,
 		storage:          storage,
 		storeSetInformer: storeSetInformer,
@@ -74,15 +76,16 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		regions:          make(map[uint64]regionCache),
 		keyRanges:        make(map[string][]GroupKeyRange),
 	}
+	if err := m.initialize(); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
-// Initialize loads affinity groups from storage and rebuilds the group-label mapping.
-func (m *Manager) Initialize() error {
+// initialize loads affinity groups from storage and rebuilds the group-label mapping.
+func (m *Manager) initialize() error {
 	m.Lock()
 	defer m.Unlock()
-	if m.initialized {
-		return nil
-	}
 
 	err := m.storage.LoadAllAffinityGroups(func(k string, v string) {
 		group := &Group{}
@@ -105,24 +108,16 @@ func (m *Manager) Initialize() error {
 		}
 	}
 
-	m.initialized = true
 	m.startAvailabilityCheckLoop()
 	log.Info("affinity manager initialized", zap.Int("group-count", len(m.groups)))
 	return nil
 }
 
-// IsInitialized returns whether the manager is initialized.
-func (m *Manager) IsInitialized() bool {
-	m.RLock()
-	defer m.RUnlock()
-	return m.initialized
-}
-
-// IsAvailable checks that the Manager has been initialized and contains at least one Group.
+// IsAvailable checks that the Manager contains at least one Group.
 func (m *Manager) IsAvailable() bool {
 	m.RLock()
 	defer m.RUnlock()
-	return m.initialized && len(m.groups) > 0
+	return len(m.groups) > 0
 }
 
 func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) {
@@ -239,10 +234,9 @@ func (m *Manager) saveCache(region *core.RegionInfo, group *GroupState) *regionC
 // InvalidCache invalidates the cache of the corresponding Region in the manager by its Region ID.
 func (m *Manager) InvalidCache(regionID uint64) {
 	m.RLock()
-	initialized := m.initialized
 	_, ok := m.regions[regionID]
 	m.RUnlock()
-	if !initialized || !ok {
+	if !ok {
 		return
 	}
 
