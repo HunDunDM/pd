@@ -112,8 +112,9 @@ type runtimeGroupInfo struct {
 
 	// Regions represents the cache of Regions.
 	Regions map[uint64]regionCache
-	// TODO: Consider separate modification support in the future (read-modify keyrange-write)
-	// Currently using label's internal multiple keyrange mechanism
+	// LabelRule using label's internal multiple keyrange mechanism.
+	// TODO: In extremely special cases (such as updating KeyRange information within the same Group simultaneously),
+	//       it may become unsynchronized with the RegionLabeler. It should currently be used only for testing.
 	LabelRule *labeler.LabelRule
 	// RangeCount counts how many KeyRanges exist in the Label.
 	RangeCount int
@@ -188,10 +189,16 @@ func (m *Manager) IsRegionAffinity(region *core.RegionInfo) bool {
 	return isAffinity
 }
 
-// GroupKeyRange represents a key range extracted from label rules.
+// GroupKeyRange represents a key range with group id.
 type GroupKeyRange struct {
 	keyutil.KeyRange
 	GroupID string
+}
+
+// GroupKeyRanges represents key ranges with group id.
+type GroupKeyRanges struct {
+	KeyRanges []keyutil.KeyRange
+	GroupID   string
 }
 
 // GroupWithRanges represents a group with its associated key ranges.

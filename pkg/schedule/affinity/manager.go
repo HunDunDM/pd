@@ -16,7 +16,6 @@ package affinity
 
 import (
 	"context"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -110,10 +109,10 @@ func (m *Manager) IsAvailable() bool {
 	return len(m.groups) > 0
 }
 
-func (m *Manager) initGroupLocked(group *Group) {
+func (m *Manager) initGroupLocked(group *Group) bool {
 	if _, ok := m.groups[group.ID]; ok {
 		log.Error("group already initialized", zap.String("group-id", group.ID))
-		return
+		return false
 	}
 	m.groups[group.ID] = &runtimeGroupInfo{
 		Group: Group{
@@ -129,6 +128,13 @@ func (m *Manager) initGroupLocked(group *Group) {
 		LabelRule:           nil,
 		RangeCount:          0,
 	}
+	return true
+}
+
+func (m *Manager) initGroup(group *Group) bool {
+	m.Lock()
+	defer m.Unlock()
+	return m.initGroupLocked(group)
 }
 
 func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) {
@@ -165,21 +171,7 @@ func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.
 	}
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
-		groupInfo = &runtimeGroupInfo{
-			Group: Group{
-				ID:              groupID,
-				CreateTimestamp: uint64(time.Now().Unix()),
-				LeaderStoreID:   0,
-				VoterStoreIDs:   nil,
-			},
-			Effect:              false,
-			AffinityVer:         1,
-			AffinityRegionCount: 0,
-			Regions:             make(map[uint64]regionCache),
-			LabelRule:           labelRule,
-			RangeCount:          rangeCount,
-		}
-		m.groups[groupID] = groupInfo
+		log.Error("group not initialized", zap.String("group-id", groupID))
 	} else {
 		// Reset Statistics
 		m.affinityRegionCount -= groupInfo.AffinityRegionCount

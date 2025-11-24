@@ -49,9 +49,9 @@ func newInfoSyncer(ctx context.Context, storage endpoint.AffinityStorage, region
 	}
 }
 
-func (s *infoSyncer) Initialize(f func(group *Group)) error {
-	s.RLock()
-	defer s.RUnlock()
+func (s *infoSyncer) Initialize(f func(group *Group) bool) error {
+	s.Lock()
+	defer s.Unlock()
 
 	return s.storage.LoadAllAffinityGroups(func(k, v string) {
 		group := &Group{}
@@ -61,6 +61,6 @@ func (s *infoSyncer) Initialize(f func(group *Group)) error {
 				zap.Error(errs.ErrLoadRule.Wrap(err)))
 			return
 		}
-		f(group)
+		_ = f(group)
 	})
 }
