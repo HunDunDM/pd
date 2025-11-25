@@ -303,6 +303,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	}); err != nil {
 		return nil, err
 	}
+
 	// Step 1: Check whether the Group exists and validate affinityVer.
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
@@ -314,6 +315,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 		}
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
+
 	// Step 2: Save the Group in storage.
 	group.LeaderStoreID = leaderStoreID
 	group.VoterStoreIDs = append([]uint64{}, voterStoreIDs...)
@@ -322,6 +324,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	}); err != nil {
 		return nil, err
 	}
+
 	// Step 3: Save the information in memory.
 	return m.updateAffinityGroupsPeer(groupID, leaderStoreID, voterStoreIDs)
 }
@@ -336,6 +339,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 
 	plan := m.regionLabeler.NewPlan()
 	var allNewRanges []GroupKeyRange
+
 	// Step 0: Validate that a Group is either fully added or fully removed.
 	for _, op := range addOps {
 		if len(op.KeyRanges) == 0 {
@@ -385,6 +389,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 			return err
 		}
 	}
+
 	// Step 2: Validate the removed KeyRanges.
 	for _, op := range removeOps {
 		currentRanges, err := m.getCurrentRanges(op.GroupID)
@@ -401,6 +406,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		currentRanges = applyRemoveOps(currentRanges, removeRanges)
 		toRemove[op.GroupID] = currentRanges
 	}
+
 	// Step 3: Create the change plan for the Label
 	for _, op := range addOps {
 		labelRuleID := GetLabelRuleID(op.GroupID)
@@ -444,6 +450,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		}
 		newRemovedLabelRules[op.GroupID] = labelRule
 	}
+
 	// Step 4: Save the Label information in storage.
 	if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, plan.CommitOps()); err != nil {
 		log.Error("failed to update affinity group ranges",
@@ -451,6 +458,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 			zap.Error(err))
 		return err
 	}
+
 	// Step 5: Save the Group and Label information in memory.
 	plan.Apply()
 
