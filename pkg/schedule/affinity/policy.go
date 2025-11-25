@@ -82,7 +82,7 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 	if m.hasUnavailableStore(voterStoreIDs) {
 		return
 	}
-	// TODO: Make it asynchronous to prevent ObserveAvailableRegion from blocking the Checker.
+	// TODO: Update asynchronously to avoid blocking the Checker.
 	_, _ = m.updateAffinityGroupPeersWithAffinityVer(group.ID, group.affinityVer, leaderStoreID, voterStoreIDs)
 }
 

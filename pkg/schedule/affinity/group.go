@@ -113,8 +113,6 @@ type runtimeGroupInfo struct {
 	// Regions represents the cache of Regions.
 	Regions map[uint64]regionCache
 	// LabelRule using label's internal multiple keyrange mechanism.
-	// TODO: In extremely special cases (such as updating KeyRange information within the same Group simultaneously),
-	//       it may become unsynchronized with the RegionLabeler. It should currently be used only for testing.
 	LabelRule *labeler.LabelRule
 	// RangeCount counts how many KeyRanges exist in the Label.
 	RangeCount int
