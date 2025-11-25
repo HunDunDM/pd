@@ -405,7 +405,10 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 				GroupID:  op.GroupID,
 			})
 		}
-		currentRanges = applyRemoveOps(currentRanges, removeRanges)
+		currentRanges, err = applyRemoveOps(currentRanges, removeRanges)
+		if err != nil {
+			return err
+		}
 		toRemove[op.GroupID] = currentRanges
 	}
 
@@ -655,7 +658,7 @@ func (m *Manager) BatchModifyGroupRanges(addOps, removeOps []GroupKeyRange) erro
 		}
 
 		// Apply remove operations
-		currentRanges = applyRemoveOps(currentRanges, ops.removes)
+		// currentRanges = applyRemoveOps(currentRanges, ops.removes)
 
 		// Apply add operations and collect new ranges
 		for _, addOp := range ops.adds {
@@ -706,28 +709,41 @@ func (m *Manager) getCurrentRanges(groupID string) ([]GroupKeyRange, error) {
 
 // applyRemoveOps filters out ranges that match remove operations.
 // Optimized with a map for O(n+m) complexity instead of O(n*m).
-func applyRemoveOps(currentRanges []GroupKeyRange, removes []GroupKeyRange) []GroupKeyRange {
+func applyRemoveOps(currentRanges []GroupKeyRange, removes []GroupKeyRange) ([]GroupKeyRange, error) {
 	if len(removes) == 0 {
-		return currentRanges
+		return currentRanges, nil
 	}
 
 	// Build a set of ranges to remove for O(1) lookup
 	// Use hex encoding to avoid key collisions
 	removeSet := make(map[string]GroupKeyRange, len(removes))
-	for _, r := range removes {
-		key := hex.EncodeToString(r.StartKey)
-		removeSet[key] = r
+	for _, remove := range removes {
+		key := hex.EncodeToString(remove.StartKey)
+		if _, exists := removeSet[key]; exists {
+			return nil, errs.ErrAffinityGroupExist.GenWithStackByArgs(remove.GroupID)
+		}
+		removeSet[key] = remove
 	}
 
 	var filtered []GroupKeyRange
 	for _, current := range currentRanges {
 		key := hex.EncodeToString(current.StartKey)
-		if remove, found := removeSet[key]; !found ||
-			!bytes.Equal(remove.StartKey, current.StartKey) || !bytes.Equal(remove.EndKey, current.EndKey) {
+		if remove, exists := removeSet[key]; exists {
+			if !bytes.Equal(remove.EndKey, current.EndKey) {
+				return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(remove.GroupID)
+			}
+			delete(removeSet, key)
+		} else {
 			filtered = append(filtered, current)
 		}
 	}
-	return filtered
+
+	for _, remove := range removeSet {
+		// There exists a Range that does not appear in currentRanges.
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(remove.GroupID)
+	}
+
+	return filtered, nil
 }
 
 // updateGroupRanges updates the label rule and cache for a group's key ranges.

@@ -60,12 +60,13 @@ type Manager struct {
 	conf             config.SharedConfigProvider
 	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
 
+	// The following members are protected by RWMutex.
 	affinityRegionCount int
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache
 	unavailableStores   map[uint64]storeState
 
-	// The following members are not protected by Manager.RWMutex.
+	// The following members are protected by metaMutex only, not protected by RWMutex.
 	keyRanges map[string][]GroupKeyRange // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
 }
 
