@@ -162,7 +162,8 @@ func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
 
 	// Step 4: Create the change plan for the Group
 	saveOps := plan.CommitOps()
-	for _, group := range groups {
+	for _, g := range groups {
+		group := g
 		saveOps = append(saveOps, func(txn kv.Txn) error {
 			return m.storage.SaveAffinityGroup(txn, group.ID, group)
 		})
@@ -258,7 +259,8 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 
 	// Step 4: Create the change plan for the Group
 	saveOps := plan.CommitOps()
-	for _, groupID := range toDelete {
+	for _, id := range toDelete {
+		groupID := id
 		saveOps = append(saveOps, func(txn kv.Txn) error {
 			return m.storage.DeleteAffinityGroup(txn, groupID)
 		})
