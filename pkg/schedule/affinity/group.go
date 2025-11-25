@@ -190,6 +190,7 @@ func (m *Manager) IsRegionAffinity(region *core.RegionInfo) bool {
 }
 
 // GroupKeyRange represents a key range with group id.
+// TODO: change []GroupKeyRange to GroupKeyRanges
 type GroupKeyRange struct {
 	keyutil.KeyRange
 	GroupID string
@@ -202,6 +203,7 @@ type GroupKeyRanges struct {
 }
 
 // GroupWithRanges represents a group with its associated key ranges.
+// TODO: remove it
 type GroupWithRanges struct {
 	Group     *Group
 	KeyRanges []keyutil.KeyRange

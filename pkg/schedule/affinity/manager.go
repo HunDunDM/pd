@@ -16,6 +16,7 @@ package affinity
 
 import (
 	"context"
+	"encoding/json"
 
 	"go.uber.org/zap"
 
@@ -43,19 +44,25 @@ type regionCache struct {
 
 // Manager is the manager of all affinity information.
 type Manager struct {
+	// RWMutex is used to protect the in-memory data inside the Manager.
 	syncutil.RWMutex
+	// metaMutex ensures the atomicity of metadata changes. It protects both in-memory data and storage data.
+	// Manager.metaMutex must not be called from within Manager.RWMutex.
+	metaMutex syncutil.Mutex
+
 	ctx              context.Context
 	storage          endpoint.AffinityStorage
 	storeSetInformer core.StoreSetInformer
 	conf             config.SharedConfigProvider
 	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
-	infoSyncer       *infoSyncer
 
 	affinityRegionCount int
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache
-	keyRanges           map[string][]GroupKeyRange // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
 	unavailableStores   map[uint64]storeState
+
+	// The following members are not protected by Manager.RWMutex.
+	keyRanges map[string][]GroupKeyRange // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
 }
 
 // NewManager creates a new affinity Manager.
@@ -69,7 +76,6 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		storeSetInformer:    storeSetInformer,
 		conf:                conf,
 		regionLabeler:       regionLabeler,
-		infoSyncer:          newInfoSyncer(ctx, storage, regionLabeler),
 		affinityRegionCount: 0,
 		groups:              make(map[string]*runtimeGroupInfo),
 		regions:             make(map[uint64]regionCache),
@@ -86,13 +92,24 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 func (m *Manager) initialize() error {
 	m.Lock()
 	defer m.Unlock()
-	if err := m.infoSyncer.Initialize(m.initGroupLocked); err != nil {
-		log.Error("init group info syncer failed", zap.Error(err))
+
+	// load groups' info
+	err := m.storage.LoadAllAffinityGroups(func(k, v string) {
+		group := &Group{}
+		if err := json.Unmarshal([]byte(v), group); err != nil {
+			log.Error("failed to unmarshal affinity group, skipping",
+				zap.String("key", k),
+				zap.Error(errs.ErrLoadRule.Wrap(err)))
+			return
+		}
+		m.initGroupLocked(group)
+	})
+	if err != nil {
 		return err
 	}
 
 	// load region labels
-	if err := m.loadRegionLabel(); err != nil {
+	if err = m.loadRegionLabel(); err != nil {
 		log.Error("failed to rebuild group-label mapping", zap.Error(err))
 		return err
 	}
@@ -109,10 +126,10 @@ func (m *Manager) IsAvailable() bool {
 	return len(m.groups) > 0
 }
 
-func (m *Manager) initGroupLocked(group *Group) bool {
+func (m *Manager) initGroupLocked(group *Group) {
 	if _, ok := m.groups[group.ID]; ok {
 		log.Error("group already initialized", zap.String("group-id", group.ID))
-		return false
+		return
 	}
 	m.groups[group.ID] = &runtimeGroupInfo{
 		Group: Group{
@@ -128,34 +145,69 @@ func (m *Manager) initGroupLocked(group *Group) bool {
 		LabelRule:           nil,
 		RangeCount:          0,
 	}
-	return true
 }
 
-func (m *Manager) initGroup(group *Group) bool {
+func (m *Manager) groupsNotExist(groups []*Group) error {
+	m.RLock()
+	defer m.RUnlock()
+	for _, group := range groups {
+		if _, ok := m.groups[group.ID]; ok {
+			return errs.ErrAffinityGroupExist.GenWithStackByArgs(group.ID)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) groupsExistAll(groupIDs []string) error {
+	m.RLock()
+	defer m.RUnlock()
+	for _, groupID := range groupIDs {
+		if _, ok := m.groups[groupID]; !ok {
+			return errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) createGroups(groups []*Group, labelRules []*labeler.LabelRule) {
 	m.Lock()
 	defer m.Unlock()
-	return m.initGroupLocked(group)
+	for i, group := range groups {
+		m.initGroupLocked(group)
+		m.updateGroupLabelRuleLocked(group.ID, labelRules[i])
+	}
 }
 
-func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) {
+func (m *Manager) updateAffinityGroupsPeer(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+	m.Lock()
+	defer m.Unlock()
+
+	groupInfo, ok := m.groups[groupID]
+	if !ok {
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+
+	groupInfo.Effect = true
+	groupInfo.LeaderStoreID = leaderStoreID
+	groupInfo.VoterStoreIDs = append([]uint64(nil), voterStoreIDs...)
+	// Reset Statistics
+	m.affinityRegionCount -= groupInfo.AffinityRegionCount
+	groupInfo.AffinityRegionCount = 0
+	groupInfo.AffinityVer++
+
+	return newGroupState(groupInfo), nil
+}
+
+func (m *Manager) updateGroupEffectLocked(groupID string, effect bool) {
+	m.Lock()
+	defer m.Unlock()
+
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		return
 	}
-	// Becoming effective requires the affinityVer to match.
-	if leaderStoreID != 0 && groupInfo.AffinityVer != affinityVer {
-		return
-	}
 
-	if leaderStoreID == 0 {
-		// Set Effect = false
-		groupInfo.Effect = false
-	} else {
-		// Set Effect = true. The affinityVer consistency has already been checked.
-		groupInfo.Effect = true
-		groupInfo.LeaderStoreID = leaderStoreID
-		groupInfo.VoterStoreIDs = append([]uint64(nil), voterStoreIDs...)
-	}
+	groupInfo.Effect = effect
 	// Reset Statistics
 	m.affinityRegionCount -= groupInfo.AffinityRegionCount
 	groupInfo.AffinityRegionCount = 0
@@ -183,6 +235,14 @@ func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.
 	}
 }
 
+func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule) {
+	m.Lock()
+	defer m.Unlock()
+	for groupID, labelRule := range labels {
+		m.updateGroupLabelRuleLocked(groupID, labelRule)
+	}
+}
+
 func (m *Manager) deleteGroupLocked(groupID string) {
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
@@ -194,7 +254,14 @@ func (m *Manager) deleteGroupLocked(groupID string) {
 	for regionID := range groupInfo.Regions {
 		delete(m.regions, regionID)
 	}
-	delete(m.keyRanges, groupID)
+}
+
+func (m *Manager) deleteGroups(groupIDs []string) {
+	m.Lock()
+	defer m.Unlock()
+	for _, groupID := range groupIDs {
+		m.deleteGroupLocked(groupID)
+	}
 }
 
 func (m *Manager) deleteCacheLocked(regionID uint64) {

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -69,7 +70,408 @@ func parseAffinityGroupIDFromLabelRule(rule *labeler.LabelRule) (string, bool) {
 	return groupID, true
 }
 
+// MakeLabelRule makes the label rule for the given GroupKeyRanges.
+func MakeLabelRule(groupKeyRanges *GroupKeyRanges) *labeler.LabelRule {
+	var labelData []any
+	for _, kr := range groupKeyRanges.KeyRanges {
+		labelData = append(labelData, map[string]any{
+			"start_key": hex.EncodeToString(kr.StartKey),
+			"end_key":   hex.EncodeToString(kr.EndKey),
+		})
+	}
+	return &labeler.LabelRule{
+		ID:       GetLabelRuleID(groupKeyRanges.GroupID),
+		Labels:   []labeler.RegionLabel{{Key: labelKey, Value: groupKeyRanges.GroupID}},
+		RuleType: labeler.KeyRange,
+		Data:     labelData,
+	}
+}
+
+// MakeLabelRuleFromRanges MakeLabelRule makes the label rule.
+func MakeLabelRuleFromRanges(groupID string, ranges []GroupKeyRange) *labeler.LabelRule {
+	var labelData []any
+	for _, kr := range ranges {
+		labelData = append(labelData, map[string]any{
+			"start_key": hex.EncodeToString(kr.StartKey),
+			"end_key":   hex.EncodeToString(kr.EndKey),
+		})
+	}
+	return &labeler.LabelRule{
+		ID:       GetLabelRuleID(groupID),
+		Labels:   []labeler.RegionLabel{{Key: labelKey, Value: groupID}},
+		RuleType: labeler.KeyRange,
+		Data:     labelData,
+	}
+}
+
+// CreateAffinityGroups adds multiple affinity groups to storage and creates corresponding label rules.
+func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
+	// Step 0: Validate all groups first (without lock)
+	groups := make([]*Group, 0, len(changes))
+	for _, change := range changes {
+		group := &Group{
+			ID:              change.GroupID,
+			CreateTimestamp: uint64(time.Now().Unix()),
+			LeaderStoreID:   0,
+			VoterStoreIDs:   nil,
+		}
+		if err := m.AdjustGroup(group); err != nil {
+			return err
+		}
+		groups = append(groups, group)
+	}
+
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+
+	// Step 1: Check whether the Group exists.
+	if err := m.groupsNotExist(groups); err != nil {
+		return err
+	}
+
+	// Step 2: Convert and validate key ranges no overlaps
+	var allNewRanges []GroupKeyRange
+	for _, change := range changes {
+		for _, kr := range change.KeyRanges {
+			allNewRanges = append(allNewRanges, GroupKeyRange{
+				KeyRange: kr,
+				GroupID:  change.GroupID,
+			})
+		}
+	}
+	if err := m.validateNoKeyRangeOverlap(allNewRanges); err != nil {
+		return err
+	}
+
+	// Step 3: Create the change plan for the Label
+	labelRules := make([]*labeler.LabelRule, 0, len(changes))
+	plan := m.regionLabeler.NewPlan()
+	for _, change := range changes {
+		if len(change.KeyRanges) > 0 {
+			labelRule := MakeLabelRule(&change)
+			if err := plan.SetLabelRule(labelRule); err != nil {
+				log.Error("failed to create label rule",
+					zap.String("failed-group-id", change.GroupID),
+					zap.Int("total-groups", len(changes)),
+					zap.Error(err))
+				return err
+			}
+			labelRules = append(labelRules, labelRule)
+		}
+	}
+
+	// Step 4: Create the change plan for the Group
+	saveOps := plan.CommitOps()
+	for _, group := range groups {
+		saveOps = append(saveOps, func(txn kv.Txn) error {
+			return m.storage.SaveAffinityGroup(txn, group.ID, group)
+		})
+	}
+
+	// Step 5: Save the Group and Label information in storage.
+	if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, saveOps); err != nil {
+		log.Error("failed to add affinity groups",
+			zap.Int("total-groups", len(changes)),
+			zap.Error(err))
+		return err
+	}
+
+	// Step 6: Save the Group and Label information in memory.
+	plan.Apply()
+
+	for i, change := range changes {
+		// Update key ranges cache for this group
+		if len(change.KeyRanges) > 0 {
+			ranges := make([]GroupKeyRange, 0, len(change.KeyRanges))
+			for _, kr := range change.KeyRanges {
+				ranges = append(ranges, GroupKeyRange{
+					KeyRange: kr,
+					GroupID:  change.GroupID,
+				})
+			}
+			m.keyRanges[change.GroupID] = ranges
+		} else {
+			// No key ranges, remove from cache if exists
+			delete(m.keyRanges, change.GroupID)
+		}
+		log.Info("affinity group added", zap.String("group", groups[i].String()))
+	}
+
+	m.createGroups(groups, labelRules)
+	return nil
+}
+
+// DeleteAffinityGroups deletes multiple affinity groups in a single transaction.
+// If force is false:
+//   - Returns error if any group does not exist
+//   - Returns error if any group has key ranges
+//
+// If force is true:
+//   - Skips non-existent groups
+//   - Deletes groups even if they have key ranges
+func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
+	if len(groupIDs) == 0 {
+		return errs.ErrAffinityGroupContent.FastGenByArgs("no group ids provided")
+	}
+
+	seen := make(map[string]struct{}, len(groupIDs))
+	toDelete := make([]string, 0, len(groupIDs))
+
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+
+	// Step 1: Check if group has key ranges when force is false
+	for _, groupID := range groupIDs {
+		if _, exists := seen[groupID]; exists {
+			continue
+		}
+		seen[groupID] = struct{}{}
+		// Check if group has key ranges when force is false
+		if !force {
+			if ranges, exists := m.keyRanges[groupID]; exists && len(ranges) > 0 {
+				return errs.ErrAffinityGroupContent.FastGenByArgs(
+					"affinity group " + groupID + " has key ranges, use force=true to delete")
+			}
+		}
+		toDelete = append(toDelete, groupID)
+	}
+
+	// Step 2: Check if all Groups exist when force is false
+	if !force {
+		if err := m.groupsExistAll(toDelete); err != nil {
+			return err
+		}
+	}
+
+	// Step 3: Create the change plan for the Label
+	plan := m.regionLabeler.NewPlan()
+	for _, groupID := range toDelete {
+		labelRuleID := GetLabelRuleID(groupID)
+		if err := plan.DeleteLabelRule(labelRuleID); err != nil {
+			log.Error("failed to delete label rule for affinity group",
+				zap.String("group-id", groupID),
+				zap.String("label-rule-id", labelRuleID),
+				zap.Error(err))
+			return err
+		}
+	}
+
+	// Step 4: Create the change plan for the Group
+	saveOps := plan.CommitOps()
+	for _, groupID := range toDelete {
+		saveOps = append(saveOps, func(txn kv.Txn) error {
+			return m.storage.DeleteAffinityGroup(txn, groupID)
+		})
+	}
+
+	// Step 5: Save the Group and Label information in storage.
+	if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, saveOps); err != nil {
+		log.Error("failed to delete affinity groups",
+			zap.Int("total-groups", len(toDelete)),
+			zap.Error(err))
+		return err
+	}
+
+	// Step 6: Save the Group and Label information in memory.
+	plan.Apply()
+
+	for _, groupID := range toDelete {
+		delete(m.keyRanges, groupID)
+		log.Info("affinity group deleted", zap.String("group-id", groupID))
+	}
+
+	m.deleteGroups(toDelete)
+	return nil
+}
+
+// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group and marks it effective.
+func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+	return m.updateAffinityGroupPeersWithAffinityVer(groupID, 0, leaderStoreID, voterStoreIDs)
+}
+
+// updateAffinityGroupPeersWithAffinityVer updates the leader and voter stores of an affinity group and marks it effective.
+// If affinityVer is non-zero, its equality will be checked.
+func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
+	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
+		return nil, errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided")
+	}
+	if err := m.AdjustGroup(&Group{
+		ID:            groupID,
+		LeaderStoreID: leaderStoreID,
+		VoterStoreIDs: voterStoreIDs,
+	}); err != nil {
+		return nil, err
+	}
+	// Step 1: Check whether the Group exists and validate affinityVer.
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+	group := m.GetAffinityGroupState(groupID)
+	if group == nil || (affinityVer != 0 && group.affinityVer != affinityVer) {
+		if affinityVer != 0 {
+			// No error is generated for changes with a non-zero affinityVer.
+			return nil, nil
+		}
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	// Step 2: Save the Group in storage.
+	group.LeaderStoreID = leaderStoreID
+	group.VoterStoreIDs = append([]uint64{}, voterStoreIDs...)
+	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
+	}); err != nil {
+		return nil, err
+	}
+	// Step 3: Save the information in memory.
+	return m.updateAffinityGroupsPeer(groupID, leaderStoreID, voterStoreIDs)
+}
+
+// UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.
+// Remove operations are executed before add operations to handle range migration scenarios.
+func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRanges) error {
+	toAdd := make(map[string][]GroupKeyRange, len(addOps))
+	toRemove := make(map[string][]GroupKeyRange, len(removeOps))
+	newAddedLabelRules := make(map[string]*labeler.LabelRule, len(addOps))
+	newRemovedLabelRules := make(map[string]*labeler.LabelRule, len(removeOps))
+
+	plan := m.regionLabeler.NewPlan()
+	var allNewRanges []GroupKeyRange
+	// Step 0: Validate that a Group is either fully added or fully removed.
+	for _, op := range addOps {
+		if len(op.KeyRanges) == 0 {
+			continue
+		}
+		if _, exists := toAdd[op.GroupID]; exists {
+			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
+		}
+		toAdd[op.GroupID] = nil
+	}
+	for _, op := range removeOps {
+		if len(op.KeyRanges) == 0 {
+			continue
+		}
+		if _, exists := toRemove[op.GroupID]; exists {
+			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
+		}
+		if _, exists := toAdd[op.GroupID]; exists {
+			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
+		}
+		toRemove[op.GroupID] = nil
+	}
+
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+
+	// Step 1: Validate the added KeyRanges.
+	for _, op := range addOps {
+		currentRanges, err := m.getCurrentRanges(op.GroupID)
+		if err != nil {
+			return err
+		}
+		// Set to add operations and collect new ranges
+		for _, keyRange := range op.KeyRanges {
+			groupKeyRange := GroupKeyRange{
+				KeyRange: keyRange,
+				GroupID:  op.GroupID,
+			}
+			currentRanges = append(currentRanges, groupKeyRange)
+			allNewRanges = append(allNewRanges, groupKeyRange)
+		}
+		toAdd[op.GroupID] = currentRanges
+	}
+	// Validate no overlaps with newly added ranges
+	if len(allNewRanges) > 0 {
+		if err := m.validateNoKeyRangeOverlap(allNewRanges); err != nil {
+			return err
+		}
+	}
+	// Step 2: Validate the removed KeyRanges.
+	for _, op := range removeOps {
+		currentRanges, err := m.getCurrentRanges(op.GroupID)
+		if err != nil {
+			return err
+		}
+		removeRanges := make([]GroupKeyRange, 0, len(op.KeyRanges))
+		for _, keyRange := range op.KeyRanges {
+			removeRanges = append(removeRanges, GroupKeyRange{
+				KeyRange: keyRange,
+				GroupID:  op.GroupID,
+			})
+		}
+		currentRanges = applyRemoveOps(currentRanges, removeRanges)
+		toRemove[op.GroupID] = currentRanges
+	}
+	// Step 3: Create the change plan for the Label
+	for _, op := range addOps {
+		labelRuleID := GetLabelRuleID(op.GroupID)
+		if err := plan.DeleteLabelRule(labelRuleID); err != nil {
+			log.Error("failed to delete label rule for affinity group",
+				zap.String("group-id", op.GroupID),
+				zap.String("label-rule-id", labelRuleID),
+				zap.Error(err))
+			return err
+		}
+		labelRule := MakeLabelRuleFromRanges(op.GroupID, toAdd[op.GroupID])
+		if err := plan.SetLabelRule(labelRule); err != nil {
+			log.Error("failed to create label rule",
+				zap.String("failed-group-id", op.GroupID),
+				zap.Int("total-groups", len(addOps)+len(removeOps)),
+				zap.Error(err))
+			return err
+		}
+		newAddedLabelRules[op.GroupID] = labelRule
+	}
+	for _, op := range removeOps {
+		labelRuleID := GetLabelRuleID(op.GroupID)
+		if err := plan.DeleteLabelRule(labelRuleID); err != nil {
+			log.Error("failed to delete label rule for affinity group",
+				zap.String("group-id", op.GroupID),
+				zap.String("label-rule-id", labelRuleID),
+				zap.Error(err))
+			return err
+		}
+		ranges := toRemove[op.GroupID]
+		var labelRule *labeler.LabelRule
+		if len(ranges) > 0 {
+			labelRule = MakeLabelRuleFromRanges(op.GroupID, ranges)
+			if err := plan.SetLabelRule(labelRule); err != nil {
+				log.Error("failed to create label rule",
+					zap.String("failed-group-id", op.GroupID),
+					zap.Int("total-groups", len(addOps)+len(removeOps)),
+					zap.Error(err))
+				return err
+			}
+		}
+		newRemovedLabelRules[op.GroupID] = labelRule
+	}
+	// Step 4: Save the Label information in storage.
+	if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, plan.CommitOps()); err != nil {
+		log.Error("failed to update affinity group ranges",
+			zap.Int("total-groups", len(addOps)+len(removeOps)),
+			zap.Error(err))
+		return err
+	}
+	// Step 5: Save the Group and Label information in memory.
+	plan.Apply()
+
+	for groupID, currentRanges := range toAdd {
+		m.keyRanges[groupID] = currentRanges
+	}
+	for groupID, currentRanges := range toRemove {
+		if len(currentRanges) > 0 {
+			m.keyRanges[groupID] = currentRanges
+		} else {
+			delete(m.keyRanges, groupID)
+		}
+	}
+
+	m.updateGroupLabelRules(newAddedLabelRules)
+	m.updateGroupLabelRules(newRemovedLabelRules)
+	return nil
+}
+
 // SaveAffinityGroups adds multiple affinity groups to storage and creates corresponding label rules.
+// TODO: Change to AddAffinityGroups.
 func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 	// Validate all groups first (without lock)
 	for _, gwr := range groupsWithRanges {
@@ -166,6 +568,7 @@ func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 
 // DeleteAffinityGroup deletes an affinity group by ID and removes its label rule.
 // If force is false and the group has key ranges, it returns an error.
+// TODO: Change to DeleteAffinityGroups
 func (m *Manager) DeleteAffinityGroup(id string, force bool) error {
 	m.Lock()
 	defer m.Unlock()
@@ -206,6 +609,7 @@ func (m *Manager) DeleteAffinityGroup(id string, force bool) error {
 
 // BatchModifyGroupRanges batch modifies key ranges for multiple affinity groups.
 // Remove operations are executed before add operations to handle range migration scenarios.
+// TODO: change to UpdateAffinityGroupKeyRanges
 func (m *Manager) BatchModifyGroupRanges(addOps, removeOps []GroupKeyRange) error {
 	m.Lock()
 	defer m.Unlock()
@@ -299,16 +703,17 @@ func applyRemoveOps(currentRanges []GroupKeyRange, removes []GroupKeyRange) []Gr
 
 	// Build a set of ranges to remove for O(1) lookup
 	// Use hex encoding to avoid key collisions
-	removeSet := make(map[string]struct{}, len(removes))
+	removeSet := make(map[string]GroupKeyRange, len(removes))
 	for _, r := range removes {
-		key := hex.EncodeToString(r.StartKey) + "|" + hex.EncodeToString(r.EndKey)
-		removeSet[key] = struct{}{}
+		key := hex.EncodeToString(r.StartKey)
+		removeSet[key] = r
 	}
 
 	var filtered []GroupKeyRange
 	for _, current := range currentRanges {
-		key := hex.EncodeToString(current.StartKey) + "|" + hex.EncodeToString(current.EndKey)
-		if _, found := removeSet[key]; !found {
+		key := hex.EncodeToString(current.StartKey)
+		if remove, found := removeSet[key]; !found ||
+			!bytes.Equal(remove.StartKey, current.StartKey) || !bytes.Equal(remove.EndKey, current.EndKey) {
 			filtered = append(filtered, current)
 		}
 	}
@@ -316,6 +721,7 @@ func applyRemoveOps(currentRanges []GroupKeyRange, removes []GroupKeyRange) []Gr
 }
 
 // updateGroupRanges updates the label rule and cache for a group's key ranges.
+// TODO: remove it
 func (m *Manager) updateGroupRanges(groupID string, ranges []GroupKeyRange) error {
 	labelRule := m.regionLabeler.GetLabelRule(GetLabelRuleID(groupID))
 	if labelRule == nil {
@@ -371,7 +777,7 @@ func (m *Manager) updateGroupRanges(groupID string, ranges []GroupKeyRange) erro
 //   - Skips non-existent groups
 //   - Deletes groups even if they have key ranges
 //
-// TODO: use smaller lock
+// TODO: change to DeleteAffinityGroups
 func (m *Manager) BatchDeleteAffinityGroups(ids []string, force bool) error {
 	m.Lock()
 	defer m.Unlock()
@@ -441,6 +847,7 @@ func (m *Manager) BatchDeleteAffinityGroups(ids []string, force bool) error {
 }
 
 // UpdateGroupPeers updates the leader and voter stores of an affinity group and marks it effective.
+// TODO: change to UpdateAffinityGroupPeers
 func (m *Manager) UpdateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	// Basic validation outside the lock to avoid blocking other operations
 	if err := m.AdjustGroup(&Group{
@@ -474,7 +881,7 @@ func (m *Manager) UpdateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 
 	// Apply to in-memory state.
 	// TODO: We pass current groupInfo to updateGroupEffectLocked
-	m.updateGroupEffectLocked(groupID, groupInfo.AffinityVer, leaderStoreID, voterStoreIDs)
+	// m.updateGroupEffectLocked(groupID, groupInfo.AffinityVer, leaderStoreID, voterStoreIDs)
 
 	return newGroupState(groupInfo), nil
 }
