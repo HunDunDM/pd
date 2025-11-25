@@ -44,10 +44,14 @@ type regionCache struct {
 
 // Manager is the manager of all affinity information.
 type Manager struct {
-	// RWMutex is used to protect the in-memory data inside the Manager.
+	// RWMutex protects only in-memory data. (Does not include auxiliary data needed for meta updates, such as keyRanges)
+	// It can be acquired on its own or while already holding metaMutex,
+	// but metaMutex must never be acquired while RWMutex is held to avoid deadlocks.
 	syncutil.RWMutex
-	// metaMutex ensures the atomicity of metadata changes. It protects both in-memory data and storage data.
-	// Manager.metaMutex must not be called from within Manager.RWMutex.
+	// metaMutex protects both in-memory and storage metadata.
+	// Metadata updates typically hold metaMutex for the whole operation,
+	// and may acquire RWMutex only for the final in-memory update.
+	// The only strict rule is that metaMutex must not be taken inside RWMutex.
 	metaMutex syncutil.Mutex
 
 	ctx              context.Context
