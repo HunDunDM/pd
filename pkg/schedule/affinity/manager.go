@@ -199,9 +199,6 @@ func (m *Manager) updateAffinityGroupsPeer(groupID string, leaderStoreID uint64,
 }
 
 func (m *Manager) updateGroupEffectLocked(groupID string, effect bool) {
-	m.Lock()
-	defer m.Unlock()
-
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		return
