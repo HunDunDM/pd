@@ -182,7 +182,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 			LeaderStoreID:   g.LeaderStoreID,
 			VoterStoreIDs:   append([]uint64(nil), g.VoterStoreIDs...),
 		},
-		IsBalanceSchedulingAllowed:  g.IsAffinitySchedulingAllowed(),
+		IsBalanceSchedulingAllowed:  g.IsAllowBalanceScheduling(),
 		IsAffinitySchedulingAllowed: g.IsAffinitySchedulingAllowed(),
 		RangeCount:                  g.RangeCount,
 		RegionCount:                 len(g.Regions),

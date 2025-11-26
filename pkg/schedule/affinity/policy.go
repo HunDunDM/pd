@@ -131,7 +131,8 @@ func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (
 	m.RLock()
 	defer m.RUnlock()
 	// Validate whether unavailableStores has changed.
-	if len(m.unavailableStores) == len(unavailableStores) {
+	isUnavailableStoresChanged = len(m.unavailableStores) != len(unavailableStores)
+	if !isUnavailableStoresChanged {
 		for storeID, state := range m.unavailableStores {
 			if state != unavailableStores[storeID] {
 				isUnavailableStoresChanged = true
@@ -148,7 +149,7 @@ func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (
 		var unavailableStore uint64
 		var maxCondition condition
 		for _, storeID := range groupInfo.VoterStoreIDs {
-			if _, ok := unavailableStores[storeID]; !ok {
+			if _, ok := unavailableStores[storeID]; ok {
 				if unavailableStore == 0 || unavailableStores[storeID] > maxCondition {
 					unavailableStore = storeID
 					maxCondition = unavailableStores[storeID]
