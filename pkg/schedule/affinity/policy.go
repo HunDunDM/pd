@@ -40,7 +40,7 @@ var (
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
 	// TODO: Improve the strategy.
-	if group == nil || group.Effect || !m.IsAvailable() {
+	if group == nil || group.IsAffinitySchedulingAllowed || !m.IsAvailable() {
 		return
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
@@ -150,10 +150,10 @@ func (m *Manager) setUnavailableStores(unavailableStores map[uint64]condition) {
 	}
 	// Update groupInfo
 	for _, groupInfo := range m.groups {
-		if !groupInfo.Effect {
+		if !groupInfo.IsAffinitySchedulingAllowed() {
 			continue
 		}
-		unavailableStore := uint64(0)
+		var unavailableStore uint64
 		_, hasUnavailableStore := unavailableStores[groupInfo.LeaderStoreID]
 		for _, storeID := range groupInfo.VoterStoreIDs {
 			if !hasUnavailableStore {
@@ -164,7 +164,7 @@ func (m *Manager) setUnavailableStores(unavailableStores map[uint64]condition) {
 			}
 		}
 		if hasUnavailableStore {
-			m.updateGroupEffectLocked(groupInfo.ID, false)
+			m.updateGroupStateLocked(groupInfo.ID, unavailableStores[unavailableStore])
 			log.Warn("affinity group invalidated due to unavailable stores",
 				zap.String("group-id", groupInfo.ID),
 				zap.Uint64("unavailable-store", unavailableStore))

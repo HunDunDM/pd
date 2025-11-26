@@ -16,6 +16,7 @@ package affinity
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -47,13 +48,12 @@ const (
 
 // toStoreState converts the condition into the corresponding Store state.
 func (s condition) toStoreState() condition {
-	if s > groupDegraded {
-		return groupUnusable
-	} else if s > groupAvailable {
-		return groupDegraded
-	} else {
+	if s == groupAvailable {
 		return groupAvailable
+	} else if s <= groupDegraded {
+		return groupDegraded
 	}
+	return groupUnusable
 }
 
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
@@ -82,8 +82,10 @@ func (g *Group) String() string {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type GroupState struct {
 	Group
-	// Effect parameter indicates whether the current constraint is in effect.
-	Effect bool `json:"effect"`
+	// IsBalanceSchedulingAllowed indicates whether balance scheduling is allowed.
+	IsBalanceSchedulingAllowed bool `json:"is_balance_scheduling_allowed"`
+	// IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.
+	IsAffinitySchedulingAllowed bool `json:"is_affinity_scheduling_allowed"`
 	// RangeCount indicates how many key ranges are associated with this group.
 	RangeCount int `json:"range_count"`
 	// RegionCount indicates how many Regions are currently in the affinity state.
@@ -100,7 +102,7 @@ type GroupState struct {
 
 // IsRegionAffinity checks whether the Region is in an affinity state.
 func (g *GroupState) isRegionAffinity(region *core.RegionInfo, cache *regionCache) bool {
-	if region == nil || !g.Effect {
+	if region == nil || g.IsBalanceSchedulingAllowed {
 		return false
 	}
 
@@ -135,9 +137,10 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo, cache *regionCach
 type runtimeGroupInfo struct {
 	Group
 
-	// Effect parameter indicates whether the current constraint is in effect.
-	// Constraints are typically released when the store is in an abnormal state.
-	Effect bool
+	// State should use the condition enum values whose names start with group.
+	State condition
+	// DegradedExpireAt indicates the expiration time of groupDegraded. After this time, it should be treated as groupUnusable.
+	DegradedExpireAt uint64
 	// AffinityVer initializes at 1 and increments by 1 each time the Group changes.
 	AffinityVer uint64
 	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores. (AffinityVer equals).
@@ -161,13 +164,43 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 			LeaderStoreID:   g.LeaderStoreID,
 			VoterStoreIDs:   append([]uint64(nil), g.VoterStoreIDs...),
 		},
-		Effect:              g.Effect,
-		RangeCount:          g.RangeCount,
-		RegionCount:         len(g.Regions),
-		AffinityRegionCount: g.AffinityRegionCount,
-		affinityVer:         g.AffinityVer,
-		groupInfoPtr:        g,
+		IsBalanceSchedulingAllowed:  g.IsAffinitySchedulingAllowed(),
+		IsAffinitySchedulingAllowed: g.IsAffinitySchedulingAllowed(),
+		RangeCount:                  g.RangeCount,
+		RegionCount:                 len(g.Regions),
+		AffinityRegionCount:         g.AffinityRegionCount,
+		affinityVer:                 g.AffinityVer,
+		groupInfoPtr:                g,
 	}
+}
+
+// IsAvailable indicates that the Group is currently in the groupAvailable state,
+// which allows affinity scheduling and disallows other balancing scheduling.
+func (g *runtimeGroupInfo) IsAvailable() bool {
+	return g.State.toStoreState() == groupAvailable
+}
+
+// IsUnusable indicates that the Group is currently in the groupUnusable state,
+// which disallows affinity scheduling and allows other balancing scheduling.
+func (g *runtimeGroupInfo) IsUnusable() bool {
+	switch g.State.toStoreState() {
+	case groupUnusable:
+		return true
+	case groupDegraded:
+		return uint64(time.Now().Unix()) > g.DegradedExpireAt
+	default:
+		return false
+	}
+}
+
+// IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.
+func (g *runtimeGroupInfo) IsAffinitySchedulingAllowed() bool {
+	return g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
+}
+
+// IsAllowBalanceScheduling indicates whether balance scheduling is allowed.
+func (g *runtimeGroupInfo) IsAllowBalanceScheduling() bool {
+	return g.IsUnusable() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
 }
 
 // AdjustGroup validates the group and sets default values.

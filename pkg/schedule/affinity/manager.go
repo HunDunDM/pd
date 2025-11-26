@@ -17,6 +17,7 @@ package affinity
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -131,6 +132,10 @@ func (m *Manager) IsAvailable() bool {
 	return len(m.groups) > 0
 }
 
+func (*Manager) getExpireAt() uint64 {
+	return uint64(time.Now().Unix()) + 600
+}
+
 func (m *Manager) initGroupLocked(group *Group) {
 	if _, ok := m.groups[group.ID]; ok {
 		log.Error("group already initialized", zap.String("group-id", group.ID))
@@ -143,7 +148,8 @@ func (m *Manager) initGroupLocked(group *Group) {
 			LeaderStoreID:   group.LeaderStoreID,
 			VoterStoreIDs:   append([]uint64(nil), group.VoterStoreIDs...),
 		},
-		Effect:              false, // TODO: observation status
+		State:               groupDegraded,
+		DegradedExpireAt:    m.getExpireAt(),
 		AffinityVer:         1,
 		AffinityRegionCount: 0,
 		Regions:             make(map[uint64]regionCache),
@@ -192,7 +198,7 @@ func (m *Manager) updateAffinityGroupsPeer(groupID string, leaderStoreID uint64,
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
 
-	groupInfo.Effect = true
+	groupInfo.State = groupAvailable
 	groupInfo.LeaderStoreID = leaderStoreID
 	groupInfo.VoterStoreIDs = append([]uint64(nil), voterStoreIDs...)
 	// Reset Statistics
@@ -203,13 +209,30 @@ func (m *Manager) updateAffinityGroupsPeer(groupID string, leaderStoreID uint64,
 	return newGroupState(groupInfo), nil
 }
 
-func (m *Manager) updateGroupEffectLocked(groupID string, effect bool) {
+func (m *Manager) updateGroupStateLocked(groupID string, state condition) {
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		return
 	}
 
-	groupInfo.Effect = effect
+	// If the expiration time has been reached, change groupDegraded to groupUnusable.
+	if groupInfo.State == groupDegraded && groupInfo.IsUnusable() {
+		groupInfo.State = groupUnusable
+	}
+
+	// Update State
+	state = state.toStoreState()
+	if state == groupDegraded {
+		// Only set the expiration time when transitioning from groupAvailable to groupDegraded.
+		// Do nothing if the original state is already groupDegraded or groupUnusable.
+		if groupInfo.State == groupAvailable {
+			groupInfo.State = groupDegraded
+			groupInfo.DegradedExpireAt = m.getExpireAt()
+		}
+	} else {
+		groupInfo.State = state
+	}
+
 	// Reset Statistics
 	m.affinityRegionCount -= groupInfo.AffinityRegionCount
 	groupInfo.AffinityRegionCount = 0
