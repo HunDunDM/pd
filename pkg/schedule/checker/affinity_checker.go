@@ -109,7 +109,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// If Region is affinity, but the Group is not replicated, expire the Group.
 	// Then provide the available Region information and fetch the Group state again.
-	if isAffinity && c.isGroupReplicated(region, group) {
+	if isAffinity && !c.isGroupReplicated(region, group) {
 		c.affinityManager.ExpireAffinityGroup(group.ID)
 		needRefetch = true
 	}
