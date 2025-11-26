@@ -739,6 +739,12 @@ type AffinityGroupState struct {
 	AffinityRegionCount         int  `json:"affinity_region_count"`
 }
 
+// IsAvailable indicates that the AffinityGroup has completed affinity scheduling.
+// nolint
+func (s *AffinityGroupState) IsAvailable() bool {
+	return s.IsAffinitySchedulingAllowed && s.AffinityRegionCount == s.RegionCount
+}
+
 // AffinityGroupsResponse defines the success response for affinity group operations.
 type AffinityGroupsResponse struct {
 	AffinityGroups map[string]*AffinityGroupState `json:"affinity_groups"`
