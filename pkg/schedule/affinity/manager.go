@@ -133,6 +133,7 @@ func (m *Manager) IsAvailable() bool {
 }
 
 func (*Manager) getExpireAt() uint64 {
+	// TODO: How to make the decision?
 	return uint64(time.Now().Unix()) + 600
 }
 
