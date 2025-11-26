@@ -62,10 +62,15 @@ func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reaso
 		return true
 	}
 
+	maxSize := int64(cluster.GetCheckerConfig().GetMaxAffinityMergeRegionSize())
+	if maxSize == 0 {
+		return true
+	}
+
 	if affinityManager := cluster.GetAffinityManager(); affinityManager != nil {
 		_, isAffinity := affinityManager.GetRegionAffinityGroupState(region)
 		if isAffinity {
-			maxSize := int64(cluster.GetCheckerConfig().GetMaxAffinityMergeRegionSize()+10) * 4
+			maxSize = (maxSize + 10) * 4
 			maxKeys := maxSize * config.RegionSizeToKeysRatio
 			// Only block splitting when the Region is in the affinity state.
 			// But still allow splitting if the Region size is too big.
