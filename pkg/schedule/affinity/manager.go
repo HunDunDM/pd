@@ -64,7 +64,7 @@ type Manager struct {
 	affinityRegionCount int
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache
-	unavailableStores   map[uint64]storeState
+	unavailableStores   map[uint64]condition
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	keyRanges map[string][]GroupKeyRange // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
@@ -85,7 +85,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		groups:              make(map[string]*runtimeGroupInfo),
 		regions:             make(map[uint64]regionCache),
 		keyRanges:           make(map[string][]GroupKeyRange),
-		unavailableStores:   make(map[uint64]storeState),
+		unavailableStores:   make(map[uint64]condition),
 	}
 	if err := m.initialize(); err != nil {
 		return nil, err

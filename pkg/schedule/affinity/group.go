@@ -23,6 +23,39 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
+// condition is an enumeration that includes both Store state and Group state.
+type condition int
+
+const (
+	// groupAvailable indicates that the current Group allows affinity scheduling and disallows other balancing scheduling.
+	groupAvailable condition = iota
+
+	// groupDegraded indicates that the current Group does not generate affinity scheduling but still disallows other balancing scheduling.
+	// All values greater than groupAvailable and less than or equal to groupDegraded represent groupDegraded states.
+	// The groupDegraded state should have an expiration time. After it expires, it should be treated as groupUnusable.
+	storeDown
+	storeLowSpace
+	storePreparing
+	groupDegraded
+
+	// groupUnusable indicates that the current Group does not generate affinity scheduling and allows other balancing scheduling.
+	// All values greater than groupDegraded and less than or equal to groupUnusable represent groupUnusable states.
+	storeEvictLeader
+	storeRemovingOrRemoved
+	groupUnusable
+)
+
+// toStoreState converts the condition into the corresponding Store state.
+func (s condition) toStoreState() condition {
+	if s > groupDegraded {
+		return groupUnusable
+	} else if s > groupAvailable {
+		return groupDegraded
+	} else {
+		return groupAvailable
+	}
+}
+
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
 // NOTE: This type is exported by HTTP API and persisted in storage. Please pay more attention when modifying it.
 type Group struct {
