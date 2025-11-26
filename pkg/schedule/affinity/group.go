@@ -33,17 +33,30 @@ const (
 
 	// groupDegraded indicates that the current Group does not generate affinity scheduling but still disallows other balancing scheduling.
 	// All values greater than groupAvailable and less than or equal to groupDegraded represent groupDegraded states.
-	// The groupDegraded state should have an expiration time. After it expires, it should be treated as groupUnusable.
+	// The groupDegraded state should have an expiration time. After it expires, it should be treated as groupExpired.
 	storeDown
 	storeLowSpace
 	storePreparing
+	storeEvictLeader
 	groupDegraded
 
-	// groupUnusable indicates that the current Group does not generate affinity scheduling and allows other balancing scheduling.
-	// All values greater than groupDegraded and less than or equal to groupUnusable represent groupUnusable states.
-	storeEvictLeader
+	// groupExpired indicates that the current Group does not generate affinity scheduling and allows other balancing scheduling.
+	// All values greater than groupDegraded and less than or equal to groupExpired represent groupExpired states.
 	storeRemovingOrRemoved
-	groupUnusable
+	groupExpired
+
+	// groupAvailable, groupDegraded, and groupExpired define the Group’s availability lifecycle.
+	// Roughly:
+	//   groupAvailable ──degraded (e.g. store evict-leader)───────────────> groupDegraded
+	//   groupDegraded  ──recovered────────────────────────────────────────> groupAvailable // expected to be temporary
+	//   groupDegraded  ──expired──────────────────────────────────────────> groupExpired
+	//   groupAvailable ──directly failed (e.g. store removed)─────────────> groupExpired
+	//   groupExpired   ──reconfigured (e.g. peers moved to healthy stores)→ groupAvailable
+	// groupDegraded is intended to be a temporary state that may return to groupAvailable,
+	// while groupExpired usually represents a terminal state under the current topology,
+	// but can become groupAvailable again after the Group’s stores/peers are reconfigured.
+	// groupDegraded has an expiration time (degradedExpireAt); once it expires, the Group is
+	// automatically treated as groupExpired.
 )
 
 // toGroupState converts the condition into the corresponding Group state.
@@ -53,15 +66,15 @@ func (s condition) toGroupState() condition {
 	} else if s <= groupDegraded {
 		return groupDegraded
 	}
-	return groupUnusable
+	return groupExpired
 }
 
 func (s condition) String() string {
 	switch s.toGroupState() {
 	case groupDegraded:
 		return "degraded"
-	case groupUnusable:
-		return "unusable"
+	case groupExpired:
+		return "expired"
 	default:
 		return "available"
 	}
@@ -150,7 +163,7 @@ type runtimeGroupInfo struct {
 
 	// State should use the condition enum values whose names start with group.
 	State condition
-	// DegradedExpireAt indicates the expiration time of groupDegraded. After this time, it should be treated as groupUnusable.
+	// DegradedExpireAt indicates the expiration time of groupDegraded. After this time, it should be treated as groupExpired.
 	DegradedExpireAt uint64
 	// AffinityVer initializes at 1 and increments by 1 each time the Group changes.
 	AffinityVer uint64
@@ -191,11 +204,11 @@ func (g *runtimeGroupInfo) IsAvailable() bool {
 	return g.State.toGroupState() == groupAvailable
 }
 
-// IsUnusable indicates that the Group is currently in the groupUnusable state,
+// IsExpired indicates that the Group is currently in the groupExpired state,
 // which disallows affinity scheduling and allows other balancing scheduling.
-func (g *runtimeGroupInfo) IsUnusable() bool {
+func (g *runtimeGroupInfo) IsExpired() bool {
 	switch g.State.toGroupState() {
-	case groupUnusable:
+	case groupExpired:
 		return true
 	case groupDegraded:
 		return uint64(time.Now().Unix()) > g.DegradedExpireAt
@@ -208,8 +221,8 @@ func (g *runtimeGroupInfo) getState() condition {
 	state := g.State.toGroupState()
 	if state == groupAvailable {
 		return groupAvailable
-	} else if g.IsUnusable() {
-		return groupUnusable
+	} else if g.IsExpired() {
+		return groupExpired
 	}
 	return groupDegraded
 }
@@ -221,7 +234,7 @@ func (g *runtimeGroupInfo) IsAffinitySchedulingAllowed() bool {
 
 // IsAllowBalanceScheduling indicates whether balance scheduling is allowed.
 func (g *runtimeGroupInfo) IsAllowBalanceScheduling() bool {
-	return g.IsUnusable() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
+	return g.IsExpired() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
 }
 
 // AdjustGroup validates the group and sets default values.

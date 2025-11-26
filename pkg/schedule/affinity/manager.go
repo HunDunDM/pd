@@ -216,16 +216,16 @@ func (m *Manager) updateGroupStateLocked(groupID string, state condition) {
 		return
 	}
 
-	// If the expiration time has been reached, change groupDegraded to groupUnusable.
-	if groupInfo.State == groupDegraded && groupInfo.IsUnusable() {
-		groupInfo.State = groupUnusable
+	// If the expiration time has been reached, change groupDegraded to groupExpired.
+	if groupInfo.State == groupDegraded && groupInfo.IsExpired() {
+		groupInfo.State = groupExpired
 	}
 
 	// Update State
 	state = state.toGroupState()
 	if state == groupDegraded {
 		// Only set the expiration time when transitioning from groupAvailable to groupDegraded.
-		// Do nothing if the original state is already groupDegraded or groupUnusable.
+		// Do nothing if the original state is already groupDegraded or groupExpired.
 		if groupInfo.State == groupAvailable {
 			groupInfo.State = groupDegraded
 			groupInfo.DegradedExpireAt = m.getExpireAt()
