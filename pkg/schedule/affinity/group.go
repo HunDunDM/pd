@@ -125,16 +125,10 @@ type GroupState struct {
 }
 
 // IsRegionAffinity checks whether the Region is in an affinity state.
-func (g *GroupState) isRegionAffinity(region *core.RegionInfo, cache *regionCache) bool {
+func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 	if region == nil || g.IsBalanceSchedulingAllowed {
 		return false
 	}
-
-	// Use the result in the cache when both the Region pointer and the Group’s affinityVer remain unchanged.
-	if region == cache.region && g.affinityVer == cache.affinityVer {
-		return cache.isAffinity
-	}
-
 	// Compare the Leader
 	if region.GetLeader().GetStoreId() != g.LeaderStoreID {
 		return false

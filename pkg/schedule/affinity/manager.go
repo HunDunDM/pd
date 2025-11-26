@@ -306,7 +306,7 @@ func (m *Manager) deleteCacheLocked(regionID uint64) {
 func (m *Manager) saveCache(region *core.RegionInfo, group *GroupState) *regionCache {
 	regionID := region.GetID()
 	cache := &regionCache{}
-	cache.isAffinity = group.isRegionAffinity(region, cache)
+	cache.isAffinity = group.isRegionAffinity(region)
 	cache.region = region
 	cache.groupInfo = group.groupInfoPtr
 	cache.affinityVer = group.affinityVer
