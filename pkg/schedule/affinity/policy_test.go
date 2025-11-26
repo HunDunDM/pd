@@ -108,7 +108,9 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 
 	// Simulate store 2 unavailable.
 	unavailable := map[uint64]condition{2: storeRemovingOrRemoved}
-	manager.setUnavailableStores(unavailable)
+	isUnavailableStoresChanged, groupStateChanges := manager.getGroupStateChanges(unavailable)
+	re.True(isUnavailableStoresChanged)
+	manager.setGroupStateChanges(unavailable, groupStateChanges)
 
 	state2 := manager.GetAffinityGroupState("avail")
 	re.False(state2.IsAffinitySchedulingAllowed)

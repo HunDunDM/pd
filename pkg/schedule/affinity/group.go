@@ -46,14 +46,25 @@ const (
 	groupUnusable
 )
 
-// toStoreState converts the condition into the corresponding Store state.
-func (s condition) toStoreState() condition {
+// toGroupState converts the condition into the corresponding Group state.
+func (s condition) toGroupState() condition {
 	if s == groupAvailable {
 		return groupAvailable
 	} else if s <= groupDegraded {
 		return groupDegraded
 	}
 	return groupUnusable
+}
+
+func (s condition) String() string {
+	switch s.toGroupState() {
+	case groupDegraded:
+		return "degraded"
+	case groupUnusable:
+		return "unusable"
+	default:
+		return "available"
+	}
 }
 
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
@@ -177,13 +188,13 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 // IsAvailable indicates that the Group is currently in the groupAvailable state,
 // which allows affinity scheduling and disallows other balancing scheduling.
 func (g *runtimeGroupInfo) IsAvailable() bool {
-	return g.State.toStoreState() == groupAvailable
+	return g.State.toGroupState() == groupAvailable
 }
 
 // IsUnusable indicates that the Group is currently in the groupUnusable state,
 // which disallows affinity scheduling and allows other balancing scheduling.
 func (g *runtimeGroupInfo) IsUnusable() bool {
-	switch g.State.toStoreState() {
+	switch g.State.toGroupState() {
 	case groupUnusable:
 		return true
 	case groupDegraded:
@@ -191,6 +202,16 @@ func (g *runtimeGroupInfo) IsUnusable() bool {
 	default:
 		return false
 	}
+}
+
+func (g *runtimeGroupInfo) getState() condition {
+	state := g.State.toGroupState()
+	if state == groupAvailable {
+		return groupAvailable
+	} else if g.IsUnusable() {
+		return groupUnusable
+	}
+	return groupDegraded
 }
 
 // IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.

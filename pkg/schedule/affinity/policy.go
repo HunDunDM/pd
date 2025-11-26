@@ -93,8 +93,9 @@ func (m *Manager) checkStoresAvailability() {
 		return
 	}
 	unavailableStores := m.generateUnavailableStores()
-	if m.isUnavailableStoresChanged(unavailableStores) {
-		m.setUnavailableStores(unavailableStores)
+	isUnavailableStoresChanged, groupStateChanges := m.getGroupStateChanges(unavailableStores)
+	if isUnavailableStoresChanged {
+		m.setGroupStateChanges(unavailableStores, groupStateChanges)
 	}
 }
 
@@ -126,49 +127,56 @@ func (m *Manager) generateUnavailableStores() map[uint64]condition {
 	return unavailableStores
 }
 
-func (m *Manager) isUnavailableStoresChanged(unavailableStores map[uint64]condition) bool {
+func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (isUnavailableStoresChanged bool, groupStateChanges map[string]condition) {
 	m.RLock()
 	defer m.RUnlock()
-	if len(m.unavailableStores) != len(unavailableStores) {
-		return true
-	}
-	for storeID, state := range m.unavailableStores {
-		if state != unavailableStores[storeID] {
-			return true
+	// Validate whether unavailableStores has changed.
+	if len(m.unavailableStores) == len(unavailableStores) {
+		for storeID, state := range m.unavailableStores {
+			if state != unavailableStores[storeID] {
+				isUnavailableStoresChanged = true
+				break
+			}
+		}
+		if !isUnavailableStoresChanged {
+			return false, nil
 		}
 	}
-	return false
-}
-
-func (m *Manager) setUnavailableStores(unavailableStores map[uint64]condition) {
-	m.Lock()
-	defer m.Unlock()
-	// Set unavailableStores
-	m.unavailableStores = unavailableStores
-	if len(m.unavailableStores) == 0 {
-		return
-	}
-	// Update groupInfo
+	// Analyze which Groups have changed state
+	groupStateChanges = make(map[string]condition)
 	for _, groupInfo := range m.groups {
-		if !groupInfo.IsAffinitySchedulingAllowed() {
-			continue
-		}
 		var unavailableStore uint64
-		_, hasUnavailableStore := unavailableStores[groupInfo.LeaderStoreID]
+		var maxCondition condition
 		for _, storeID := range groupInfo.VoterStoreIDs {
-			if !hasUnavailableStore {
-				_, hasUnavailableStore = unavailableStores[storeID]
-				if hasUnavailableStore {
+			if _, ok := unavailableStores[storeID]; !ok {
+				if unavailableStore == 0 || unavailableStores[storeID] > maxCondition {
 					unavailableStore = storeID
+					maxCondition = unavailableStores[storeID]
 				}
 			}
 		}
-		if hasUnavailableStore {
-			m.updateGroupStateLocked(groupInfo.ID, unavailableStores[unavailableStore])
-			log.Warn("affinity group invalidated due to unavailable stores",
-				zap.String("group-id", groupInfo.ID),
-				zap.Uint64("unavailable-store", unavailableStore))
+		newState := maxCondition.toGroupState()
+		if newState != groupInfo.getState() {
+			groupStateChanges[groupInfo.ID] = newState
+			if unavailableStore != 0 {
+				log.Warn("affinity group invalidated due to unavailable stores",
+					zap.String("group-id", groupInfo.ID),
+					zap.Uint64("unavailable-store", unavailableStore),
+					zap.String("state", newState.String()))
+			} else {
+				log.Info("affinity group become available", zap.String("group-id", groupInfo.ID))
+			}
 		}
+	}
+	return
+}
+
+func (m *Manager) setGroupStateChanges(unavailableStores map[uint64]condition, groupStateChanges map[string]condition) {
+	m.Lock()
+	defer m.Unlock()
+	m.unavailableStores = unavailableStores
+	for groupID, state := range groupStateChanges {
+		m.updateGroupStateLocked(groupID, state)
 	}
 }
 

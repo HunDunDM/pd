@@ -221,7 +221,7 @@ func (m *Manager) updateGroupStateLocked(groupID string, state condition) {
 	}
 
 	// Update State
-	state = state.toStoreState()
+	state = state.toGroupState()
 	if state == groupDegraded {
 		// Only set the expiration time when transitioning from groupAvailable to groupDegraded.
 		// Do nothing if the original state is already groupDegraded or groupUnusable.
