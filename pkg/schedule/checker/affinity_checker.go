@@ -105,8 +105,8 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		// If the Group is affinity scheduling allowed and the Region is not in the affinity state,
 		// we expect to schedule the Region to match the Group’s peers.
 		// Before doing so, check whether the Group’s peers are replicated.
-		// If not, the Group information may be outdated (e.g. due to Placement Rules changes),
-		// so update the state first, then provide the available Region information and fetch the Group state again.
+		// If not, the Group information should be expired (e.g. due to Placement Rules changes),
+		// so expire the group first, then provide the available Region information and fetch the Group state again.
 		if !isAffinity && !c.isGroupReplicated(region, group) {
 			c.affinityManager.ExpireAffinityGroup(group.ID)
 			needRefetch = true
