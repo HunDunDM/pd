@@ -125,7 +125,7 @@ func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
 	defer m.metaMutex.Unlock()
 
 	// Step 1: Check whether the Group exists.
-	if err := m.groupsNotExist(groups); err != nil {
+	if err := m.noGroupsExist(groups); err != nil {
 		return err
 	}
 
@@ -239,7 +239,7 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 
 	// Step 2: Check if all Groups exist when force is false
 	if !force {
-		if err := m.groupsExistAll(toDelete); err != nil {
+		if err := m.allGroupsExist(toDelete); err != nil {
 			return err
 		}
 	}
