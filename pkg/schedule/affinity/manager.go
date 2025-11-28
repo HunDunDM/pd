@@ -366,12 +366,11 @@ func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo) (group *G
 	if region == nil || !m.IsAvailable() {
 		return nil, false
 	}
-	cache, group := m.getCache(region)
+	var cache *regionCache
+	cache, group = m.getCache(region)
 	if cache == nil || group == nil || region != cache.region {
 		groupID := m.regionLabeler.GetRegionLabel(region, labelKey)
-		if groupID != "" {
-			group = m.GetAffinityGroupState(groupID)
-		}
+		group = m.GetAffinityGroupState(groupID)
 		if group == nil {
 			return nil, false
 		}
@@ -391,6 +390,9 @@ func (m *Manager) IsGroupExist(id string) bool {
 
 // GetAffinityGroupState gets the runtime state of an affinity group.
 func (m *Manager) GetAffinityGroupState(id string) *GroupState {
+	if id == "" {
+		return nil
+	}
 	m.RLock()
 	defer m.RUnlock()
 	groupInfo, ok := m.groups[id]
@@ -413,7 +415,6 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // GetGroups returns the internal groups map.
 // Used for testing only.
-// TODO: Move these tests.
 func (m *Manager) GetGroups() map[string]*runtimeGroupInfo {
 	m.RLock()
 	defer m.RUnlock()
