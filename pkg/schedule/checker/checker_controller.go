@@ -362,12 +362,21 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 
 	if c.conf.IsAffinitySchedulingEnabled() {
 		if ops := measureChecker(c.metrics.checkRegionHistograms[affinityChecker], func() []*operator.Operator {
-			if ops := c.affinityChecker.Check(region); ops != nil {
+			ops := c.affinityChecker.Check(region)
+			switch len(ops) {
+			case 1:
+				// affinity move peer schedule
 				if opController.OperatorCount(operator.OpRegion) < c.conf.GetRegionScheduleLimit() {
 					return ops
 				}
 				operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpRegion)
 				c.pendingProcessedRegions.Put(region.GetID(), nil)
+			case 2:
+				// affinity merge schedule
+				if opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit() {
+					return ops
+				}
+				operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpMerge)
 			}
 			return nil
 		}); len(ops) > 0 {

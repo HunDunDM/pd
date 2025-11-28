@@ -282,10 +282,14 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 // - Does NOT skip recently split or recently started regions (as requested)
 // - Only merges regions within the same affinity group
 func (c *AffinityChecker) MergeCheck(region *core.RegionInfo, group *affinity.GroupState) []*operator.Operator {
+	maxSize := int64(c.conf.GetMaxAffinityMergeRegionSize())
+	if maxSize == 0 {
+		affinityMergeCheckerDisabledCounter.Inc()
+		return nil
+	}
 	affinityMergeCheckerCounter.Inc()
 
 	// Region is not small enough
-	maxSize := int64(c.conf.GetMaxAffinityMergeRegionSize())
 	maxKeys := maxSize * config.RegionSizeToKeysRatio
 	if !region.NeedMerge(maxSize, maxKeys) {
 		affinityMergeCheckerNoNeedCounter.Inc()
