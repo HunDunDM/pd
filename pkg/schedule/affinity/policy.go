@@ -147,16 +147,16 @@ func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (
 	groupStateChanges = make(map[string]condition)
 	for _, groupInfo := range m.groups {
 		var unavailableStore uint64
-		var maxCondition condition
+		var maxState condition
 		for _, storeID := range groupInfo.VoterStoreIDs {
 			if state, ok := unavailableStores[storeID]; ok && (!state.affectsLeaderOnly() || storeID == groupInfo.LeaderStoreID) {
-				if unavailableStore == 0 || unavailableStores[storeID] > maxCondition {
+				if unavailableStore == 0 || state > maxState {
 					unavailableStore = storeID
-					maxCondition = unavailableStores[storeID]
+					maxState = state
 				}
 			}
 		}
-		newState := maxCondition.toGroupState()
+		newState := maxState.toGroupState()
 		if newState != groupInfo.getState() {
 			groupStateChanges[groupInfo.ID] = newState
 			if unavailableStore != 0 {

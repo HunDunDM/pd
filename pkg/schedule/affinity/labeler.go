@@ -285,7 +285,7 @@ func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64,
 
 // updateAffinityGroupPeersWithAffinityVer updates the leader and voter stores of an affinity group and marks it available.
 // If affinityVer is non-zero (0 indicates an admin operation and is enforced)
-//   - its equality will be checked.
+//   - Its equality will be checked.
 //   - Group must not change voterStoreIDs while it is not in the expired state.
 func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
@@ -313,7 +313,8 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	}
 
 	// Group must not change voterStoreIDs while it is not in the expired state.
-	// RegularSchedulingEnabled = IsExpired
+	// RegularSchedulingEnabled == IsExpired
+	// The VoterStoreIDs from the API and RegionInfo are already sorted, so they can be compared directly
 	if affinityVer != 0 && !group.RegularSchedulingEnabled && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
 		return nil, nil
 	}
