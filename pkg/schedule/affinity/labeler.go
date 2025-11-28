@@ -17,6 +17,7 @@ package affinity
 import (
 	"bytes"
 	"encoding/hex"
+	"slices"
 	"strings"
 	"time"
 
@@ -275,11 +276,17 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group and marks it available.
 func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+	// To make it easier to compare using slices.Equal.
+	voterStoreIDs = slices.Clone(voterStoreIDs)
+	slices.Sort(voterStoreIDs)
+
 	return m.updateAffinityGroupPeersWithAffinityVer(groupID, 0, leaderStoreID, voterStoreIDs)
 }
 
 // updateAffinityGroupPeersWithAffinityVer updates the leader and voter stores of an affinity group and marks it available.
-// If affinityVer is non-zero, its equality will be checked.
+// If affinityVer is non-zero (0 indicates an admin operation and is enforced)
+//   - its equality will be checked.
+//   - Group must not change voterStoreIDs while it is not in the expired state.
 func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
 	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
@@ -293,7 +300,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 		return nil, err
 	}
 
-	// Step 1: Check whether the Group exists and validate affinityVer.
+	// Step 1: Check whether the Group exists and validate.
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 	group := m.GetAffinityGroupState(groupID)
@@ -303,6 +310,12 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 			return nil, nil
 		}
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+
+	// Group must not change voterStoreIDs while it is not in the expired state.
+	// RegularSchedulingEnabled = IsExpired
+	if affinityVer != 0 && !group.RegularSchedulingEnabled && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
+		return nil, nil
 	}
 
 	// Step 2: Save the Group in storage.
