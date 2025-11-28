@@ -286,12 +286,12 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 	return nil
 }
 
-// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group and marks it effective.
+// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group and marks it available.
 func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	return m.updateAffinityGroupPeersWithAffinityVer(groupID, 0, leaderStoreID, voterStoreIDs)
 }
 
-// updateAffinityGroupPeersWithAffinityVer updates the leader and voter stores of an affinity group and marks it effective.
+// updateAffinityGroupPeersWithAffinityVer updates the leader and voter stores of an affinity group and marks it available.
 // If affinityVer is non-zero, its equality will be checked.
 func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
@@ -476,8 +476,8 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		}
 	}
 
-	m.updateGroupLabelRules(newAddedLabelRules)
-	m.updateGroupLabelRules(newRemovedLabelRules)
+	m.updateGroupLabelRules(newAddedLabelRules, false)
+	m.updateGroupLabelRules(newRemovedLabelRules, true)
 	return nil
 }
 
@@ -715,7 +715,7 @@ func (m *Manager) loadRegionLabel() error {
 		}
 
 		// Associate the label rule with the group
-		m.updateGroupLabelRuleLocked(groupID, rule)
+		m.updateGroupLabelRuleLocked(groupID, rule, false)
 
 		return true
 	})

@@ -189,7 +189,7 @@ func (m *Manager) createGroups(groups []*Group, labelRules []*labeler.LabelRule)
 	defer m.Unlock()
 	for i, group := range groups {
 		m.initGroupLocked(group)
-		m.updateGroupLabelRuleLocked(group.ID, labelRules[i])
+		m.updateGroupLabelRuleLocked(group.ID, labelRules[i], false)
 	}
 }
 
@@ -250,7 +250,7 @@ func (m *Manager) ExpireAffinityGroup(groupID string) {
 	m.updateGroupStateLocked(groupID, groupExpired)
 }
 
-func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.LabelRule) {
+func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.LabelRule, needClear bool) {
 	rangeCount := 0
 	if labelRule != nil {
 		if ranges, ok := labelRule.Data.([]*labeler.KeyRangeRule); ok {
@@ -261,38 +261,40 @@ func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.
 	if !ok {
 		log.Error("group not initialized", zap.String("group-id", groupID))
 	} else {
-		m.resetCountLocked(groupInfo)
+		if needClear {
+			m.clearGroupCacheLocked(groupID)
+		} else {
+			m.resetCountLocked(groupInfo)
+		}
 		// Set LabelRule
 		groupInfo.LabelRule = labelRule
 		groupInfo.RangeCount = rangeCount
 	}
 }
 
-func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule) {
+func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule, needClear bool) {
 	m.Lock()
 	defer m.Unlock()
 	for groupID, labelRule := range labels {
-		m.updateGroupLabelRuleLocked(groupID, labelRule)
+		m.updateGroupLabelRuleLocked(groupID, labelRule, needClear)
 	}
 }
 
-func (m *Manager) deleteGroupCacheLocked(groupID string) {
+func (m *Manager) clearGroupCacheLocked(groupID string) {
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		return
 	}
 
-	m.affinityRegionCount -= groupInfo.AffinityRegionCount
+	m.resetCountLocked(groupInfo)
 	for regionID := range groupInfo.Regions {
 		delete(m.regions, regionID)
 	}
-
-	groupInfo.AffinityRegionCount = 0
 	groupInfo.Regions = make(map[uint64]regionCache)
 }
 
 func (m *Manager) deleteGroupLocked(groupID string) {
-	m.deleteGroupCacheLocked(groupID)
+	m.clearGroupCacheLocked(groupID)
 	delete(m.groups, groupID)
 }
 
