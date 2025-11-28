@@ -284,7 +284,11 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 func (c *AffinityChecker) MergeCheck(region *core.RegionInfo, group *affinity.GroupState) []*operator.Operator {
 	maxSize := int64(c.conf.GetMaxAffinityMergeRegionSize())
 	if maxSize == 0 {
-		affinityMergeCheckerDisabledCounter.Inc()
+		if c.conf.GetMaxMergeRegionSize() == 0 {
+			affinityMergeCheckerGlobalDisabledCounter.Inc()
+		} else {
+			affinityMergeCheckerDisabledCounter.Inc()
+		}
 		return nil
 	}
 	affinityMergeCheckerCounter.Inc()
