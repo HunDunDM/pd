@@ -121,6 +121,8 @@ func (m *Manager) generateUnavailableStores() map[uint64]condition {
 		case store.IsPreparing():
 			unavailableStores[store.GetID()] = storePreparing
 		}
+		// Note: We intentionally do NOT check:
+		// - IsSlow(): Performance issue, not availability issue
 	}
 	return unavailableStores
 }
