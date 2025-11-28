@@ -16,6 +16,7 @@ package affinity
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/tikv/pd/pkg/core"
@@ -190,7 +191,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 			ID:              g.ID,
 			CreateTimestamp: g.CreateTimestamp,
 			LeaderStoreID:   g.LeaderStoreID,
-			VoterStoreIDs:   append([]uint64(nil), g.VoterStoreIDs...),
+			VoterStoreIDs:   slices.Clone(g.VoterStoreIDs),
 		},
 		RegularSchedulingEnabled:  g.IsRegularSchedulingEnabled(),
 		AffinitySchedulingEnabled: g.IsAffinitySchedulingEnabled(),

@@ -320,7 +320,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 
 	// Step 2: Save the Group in storage.
 	group.LeaderStoreID = leaderStoreID
-	group.VoterStoreIDs = append([]uint64{}, voterStoreIDs...)
+	group.VoterStoreIDs = slices.Clone(voterStoreIDs)
 	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
 	}); err != nil {
@@ -380,7 +380,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		// Merge current ranges with new ranges to add
 		toAdd[op.GroupID] = GroupKeyRanges{
 			GroupID:   op.GroupID,
-			KeyRanges: append(append([]keyutil.KeyRange(nil), currentRanges.KeyRanges...), op.KeyRanges...),
+			KeyRanges: slices.Concat(currentRanges.KeyRanges, op.KeyRanges),
 		}
 
 		// Collect new ranges for overlap validation
