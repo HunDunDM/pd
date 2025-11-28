@@ -48,7 +48,7 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 	for _, voter := range region.GetVoters() {
 		voterStoreIDs = append(voterStoreIDs, voter.GetStoreId())
 	}
-	if m.hasUnavailableStore(voterStoreIDs) {
+	if m.hasUnavailableStore(leaderStoreID, voterStoreIDs) {
 		return
 	}
 	// TODO: Update asynchronously to avoid blocking the Checker.
@@ -149,7 +149,7 @@ func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (
 		var unavailableStore uint64
 		var maxCondition condition
 		for _, storeID := range groupInfo.VoterStoreIDs {
-			if _, ok := unavailableStores[storeID]; ok {
+			if state, ok := unavailableStores[storeID]; ok && (!state.affectsLeaderOnly() || storeID == groupInfo.LeaderStoreID) {
 				if unavailableStore == 0 || unavailableStores[storeID] > maxCondition {
 					unavailableStore = storeID
 					maxCondition = unavailableStores[storeID]
@@ -181,12 +181,12 @@ func (m *Manager) setGroupStateChanges(unavailableStores map[uint64]condition, g
 	}
 }
 
-func (m *Manager) hasUnavailableStore(storeIDs []uint64) bool {
+func (m *Manager) hasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint64) bool {
 	m.RLock()
 	defer m.RUnlock()
-	for _, storeID := range storeIDs {
-		_, ok := m.unavailableStores[storeID]
-		if ok {
+	for _, storeID := range voterStoreIDs {
+		state, ok := m.unavailableStores[storeID]
+		if ok && (!state.affectsLeaderOnly() || storeID == leaderStoreID) {
 			return true
 		}
 	}

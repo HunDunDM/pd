@@ -70,6 +70,15 @@ func (s condition) toGroupState() condition {
 	return groupExpired
 }
 
+func (s condition) affectsLeaderOnly() bool {
+	switch s {
+	case storeEvictLeader:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s condition) String() string {
 	switch s.toGroupState() {
 	case groupDegraded:
