@@ -117,7 +117,7 @@ func TestAffinityCheckerMovePeer(t *testing.T) {
 	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
 }
 
-func TestAffinityCheckerGroupNotInEffect(t *testing.T) {
+func TestAffinityCheckerGroupState(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -199,9 +199,9 @@ func TestAffinityCheckerPaused(t *testing.T) {
 	re.Equal("affinity-move-region", ops[0].Desc())
 }
 
-// TestHealthCheckAndOperatorGeneration tests the full flow:
+// TestAvailabilityCheckAndOperatorGeneration tests the full flow:
 // Manager detects unhealthy store -> invalidates group -> checker skips operators -> store recovers -> checker creates operators
-func TestHealthCheckAndOperatorGeneration(t *testing.T) {
+func TestAvailabilityCheckAndOperatorGeneration(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
