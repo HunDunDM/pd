@@ -316,7 +316,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 		}
 		// Group must not change voterStoreIDs while it is not in the expired state.
 		// RegularSchedulingEnabled == IsExpired
-		// The VoterStoreIDs from the API and RegionInfo are already sorted, so they can be compared directly
+		// The VoterStoreIDs from the API and Observe are already sorted, so they can be compared directly
 		if !group.RegularSchedulingEnabled && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
 			return group, nil
 		}
