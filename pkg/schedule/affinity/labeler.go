@@ -304,19 +304,22 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 	group := m.GetAffinityGroupState(groupID)
-	if group == nil || (affinityVer != 0 && group.affinityVer != affinityVer) {
-		if affinityVer != 0 {
-			// No error is generated for changes with a non-zero affinityVer.
-			return nil, nil
-		}
+	if group == nil {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
-
-	// Group must not change voterStoreIDs while it is not in the expired state.
-	// RegularSchedulingEnabled == IsExpired
-	// The VoterStoreIDs from the API and RegionInfo are already sorted, so they can be compared directly
-	if affinityVer != 0 && !group.RegularSchedulingEnabled && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
-		return nil, nil
+	// When affinityVer is non-zero, it indicates a non-admin operation and triggers additional checks.
+	// Note: if the check fails, no changes are applied. The existing Group is returned as-is without error.
+	if affinityVer == 0 {
+		// If affinityVer is not equal, the update may come from stale statistics and will be ignored.
+		if group.affinityVer != affinityVer {
+			return group, nil
+		}
+		// Group must not change voterStoreIDs while it is not in the expired state.
+		// RegularSchedulingEnabled == IsExpired
+		// The VoterStoreIDs from the API and RegionInfo are already sorted, so they can be compared directly
+		if !group.RegularSchedulingEnabled && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
+			return group, nil
+		}
 	}
 
 	// Step 2: Save the Group in storage.
