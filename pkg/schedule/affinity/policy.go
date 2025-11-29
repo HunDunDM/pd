@@ -15,6 +15,7 @@
 package affinity
 
 import (
+	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -44,10 +45,11 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 		return
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
-	voterStoreIDs := make([]uint64, 0, len(region.GetVoters()))
-	for _, voter := range region.GetVoters() {
-		voterStoreIDs = append(voterStoreIDs, voter.GetStoreId())
+	voterStoreIDs := make([]uint64, len(region.GetVoters()))
+	for i, voter := range region.GetVoters() {
+		voterStoreIDs[i] = voter.GetStoreId()
 	}
+	slices.Sort(voterStoreIDs)
 	if m.hasUnavailableStore(leaderStoreID, voterStoreIDs) {
 		return
 	}
