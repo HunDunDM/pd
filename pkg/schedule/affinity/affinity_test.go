@@ -49,7 +49,7 @@ func (m *Manager) createGroupForTest(re *require.Assertions, id string, rangeCou
 		KeyRanges: make([]keyutil.KeyRange, rangeCount),
 		GroupID:   id,
 	}
-	for i := 0; i < rangeCount; i++ {
+	for i := range rangeCount {
 		gkr.KeyRanges[i] = keyutil.KeyRange{
 			StartKey: []byte(fmt.Sprintf("test-%s-%04d", id, i)),
 			EndKey:   []byte(fmt.Sprintf("test-%s-%04d", id, i+1)),
@@ -62,7 +62,7 @@ func (m *Manager) createGroupForTest(re *require.Assertions, id string, rangeCou
 func (m *Manager) testCacheStale(re *require.Assertions, region *core.RegionInfo) {
 	cache, group := m.getCache(region)
 	if cache != nil && group != nil {
-		re.True(cache.affinityVer != group.affinityVer)
+		re.NotEqual(cache.affinityVer, group.affinityVer)
 	}
 }
 
@@ -70,10 +70,10 @@ func (m *Manager) testCacheStale(re *require.Assertions, region *core.RegionInfo
 // where voterStoreIDs[0] is used as the leaderStoreID.
 func generateRegionForTest(id uint64, voterStoreIDs []uint64, keyRange keyutil.KeyRange) *core.RegionInfo {
 	peers := make([]*metapb.Peer, len(voterStoreIDs))
-	for i, storeId := range voterStoreIDs {
+	for i, storeID := range voterStoreIDs {
 		peers[i] = &metapb.Peer{
 			Id:      id*10 + uint64(i),
-			StoreId: storeId,
+			StoreId: storeID,
 		}
 	}
 	meta := &metapb.Region{
