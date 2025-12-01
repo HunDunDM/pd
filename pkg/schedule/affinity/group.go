@@ -68,6 +68,7 @@ type Phase string
 
 const (
 	// PhasePending indicates that the Group is still determining the StoreIDs.
+	// If the Group has no KeyRanges, it remains in PhasePending forever.
 	PhasePending = Phase("pending")
 	// PhasePreparing indicates that the Group is scheduling Regions according to the required Peers.
 	PhasePreparing = Phase("preparing")
@@ -226,8 +227,8 @@ type runtimeGroupInfo struct {
 func newGroupState(g *runtimeGroupInfo) *GroupState {
 	var phase Phase
 	affinitySchedulingEnabled := g.IsAffinitySchedulingEnabled()
-	if affinitySchedulingEnabled {
-		if len(g.Regions) == g.AffinityRegionCount {
+	if g.RangeCount != 0 && affinitySchedulingEnabled {
+		if g.AffinityRegionCount > 0 && len(g.Regions) == g.AffinityRegionCount {
 			phase = PhaseStable
 		} else {
 			phase = PhasePreparing

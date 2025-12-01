@@ -738,17 +738,18 @@ type AffinityGroupState struct {
 	AffinityRegionCount int    `json:"affinity_region_count"`
 }
 
-// IsPending indicates that the AffinityGroup has completed affinity scheduling.
+// IsPending indicates that the Group is still determining the StoreIDs.
+// If the Group has no KeyRanges, it remains in pending forever.
 func (s *AffinityGroupState) IsPending() bool {
 	return s.Phase == "pending"
 }
 
-// IsPreparing indicates that the AffinityGroup has completed affinity scheduling.
+// IsPreparing indicates that the Group is scheduling Regions according to the required Peers.
 func (s *AffinityGroupState) IsPreparing() bool {
 	return s.Phase == "preparing"
 }
 
-// IsStable indicates that the AffinityGroup has completed affinity scheduling.
+// IsStable indicates that the Group has completed the required scheduling and is currently in a stable state.
 func (s *AffinityGroupState) IsStable() bool {
 	return s.Phase == "stable"
 }
