@@ -100,6 +100,25 @@ func (s condition) String() string {
 	}
 }
 
+func (s condition) StoreStateString() string {
+	switch s {
+	case storeEvictLeader:
+		return "evicted"
+	case storeDisconnected:
+		return "disconnected"
+	case storePreparing:
+		return "preparing"
+	case storeLowSpace:
+		return "low-space"
+	case storeDown:
+		return "down"
+	case storeRemovingOrRemoved:
+		return "removing-or-removed"
+	default:
+		return "unknown"
+	}
+}
+
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
 // NOTE: This type is exported by HTTP API and persisted in storage. Please pay more attention when modifying it.
 type Group struct {
