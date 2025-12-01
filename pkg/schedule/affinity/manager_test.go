@@ -185,7 +185,7 @@ func TestRegionCountStaleCache(t *testing.T) {
 	re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{GroupID: "g", KeyRanges: ranges[1:]}}))
 	groupInfo = manager.getGroupForTest(re, "g")
 	re.Equal(0, groupInfo.AffinityRegionCount)
-	re.Len(groupInfo.Regions, 0)
+	re.Empty(groupInfo.Regions)
 
 	// Add key ranges, which bumps AffinityVer and invalidates affinity for the cached region.
 	_, isAffinity = manager.GetRegionAffinityGroupState(region)

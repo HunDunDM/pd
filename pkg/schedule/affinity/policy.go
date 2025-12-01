@@ -186,7 +186,7 @@ func (m *Manager) hasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint
 	for _, storeID := range voterStoreIDs {
 		state, ok := m.unavailableStores[storeID]
 		if ok && (!state.affectsLeaderOnly() || storeID == leaderStoreID) {
-			return errs.ErrAffinityGroupContent.GenWithStackByArgs(fmt.Sprintf("store %d is %s", storeID, state.StoreStateString()))
+			return errs.ErrAffinityGroupContent.GenWithStackByArgs(fmt.Sprintf("store %d is %s", storeID, state.storeStateString()))
 		}
 	}
 	return nil

@@ -63,6 +63,18 @@ const (
 	// automatically treated as groupExpired.
 )
 
+// Phase is a status intended for API display
+type Phase string
+
+const (
+	// PhasePending indicates that the Group is still determining the StoreIDs.
+	PhasePending = Phase("pending")
+	// PhasePreparing indicates that the Group is scheduling Regions according to the required Peers.
+	PhasePreparing = Phase("preparing")
+	// PhaseStable indicates that the Group has completed the required scheduling and is currently in a stable state.
+	PhaseStable = Phase("stable")
+)
+
 // idPattern is a regex that specifies acceptable characters of the id.
 // Valid id must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
 // numbers (0-9), hyphens (-), and underscores (_).
@@ -100,7 +112,7 @@ func (s condition) String() string {
 	}
 }
 
-func (s condition) StoreStateString() string {
+func (s condition) storeStateString() string {
 	switch s {
 	case storeEvictLeader:
 		return "evicted"
@@ -146,9 +158,11 @@ func (g *Group) String() string {
 type GroupState struct {
 	Group
 	// RegularSchedulingEnabled indicates whether balance scheduling is allowed.
-	RegularSchedulingEnabled bool `json:"regular_scheduling_enabled"`
+	RegularSchedulingEnabled bool `json:"-"`
 	// AffinitySchedulingEnabled indicates whether affinity scheduling is allowed.
-	AffinitySchedulingEnabled bool `json:"affinity_scheduling_enabled"`
+	AffinitySchedulingEnabled bool `json:"-"`
+	// Phase is a status intended for API display. See the definition of Phase for details.
+	Phase Phase `json:"phase"`
 	// RangeCount indicates how many key ranges are associated with this group.
 	RangeCount int `json:"range_count"`
 	// RegionCount indicates how many Regions are currently in the group.
@@ -210,6 +224,18 @@ type runtimeGroupInfo struct {
 // newGroupState creates a GroupState from the given runtimeGroupInfo.
 // runtimeGroupInfo may need to be accessed under a Lock.
 func newGroupState(g *runtimeGroupInfo) *GroupState {
+	var phase Phase
+	affinitySchedulingEnabled := g.IsAffinitySchedulingEnabled()
+	if affinitySchedulingEnabled {
+		if len(g.Regions) == g.AffinityRegionCount {
+			phase = PhaseStable
+		} else {
+			phase = PhasePreparing
+		}
+	} else {
+		phase = PhasePending
+	}
+
 	return &GroupState{
 		Group: Group{
 			ID:              g.ID,
@@ -218,7 +244,8 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 			VoterStoreIDs:   slices.Clone(g.VoterStoreIDs),
 		},
 		RegularSchedulingEnabled:  g.IsRegularSchedulingEnabled(),
-		AffinitySchedulingEnabled: g.IsAffinitySchedulingEnabled(),
+		AffinitySchedulingEnabled: affinitySchedulingEnabled,
+		Phase:                     phase,
 		RangeCount:                g.RangeCount,
 		RegionCount:               len(g.Regions),
 		AffinityRegionCount:       g.AffinityRegionCount,
