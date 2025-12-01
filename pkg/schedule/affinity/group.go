@@ -16,6 +16,7 @@ package affinity
 
 import (
 	"encoding/json"
+	"regexp"
 	"slices"
 	"time"
 
@@ -60,6 +61,13 @@ const (
 	// groupDegraded has an expiration time (degradedExpiredAt); once it expires, the Group is
 	// automatically treated as groupExpired.
 )
+
+// idPattern is a regex that specifies acceptable characters of the id.
+// Valid id must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
+// numbers (0-9), hyphens (-), and underscores (_).
+const idPattern = "^[-A-Za-z0-9_]{1,64}$"
+
+var idRegexp = regexp.MustCompile(idPattern)
 
 // toGroupState converts the condition into the corresponding Group state.
 func (s condition) toGroupState() condition {
@@ -286,4 +294,12 @@ func (m *Manager) AdjustGroup(g *Group) error {
 type GroupKeyRanges struct {
 	KeyRanges []keyutil.KeyRange
 	GroupID   string
+}
+
+// ValidateGroupID checks the ID format.
+func ValidateGroupID(id string) error {
+	if idRegexp.MatchString(id) {
+		return nil
+	}
+	return errs.ErrInvalidGroupID.GenWithStackByArgs(id)
 }
