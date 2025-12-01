@@ -23,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -36,10 +37,10 @@ const (
 	// groupDegraded indicates that the current Group does not generate affinity scheduling but still disallows other balancing scheduling.
 	// All values greater than groupAvailable and less than or equal to groupDegraded represent groupDegraded states.
 	// The groupDegraded state should have an expiration time. After it expires, it should be treated as groupExpired.
-	storeDisconnected
-	storeLowSpace
-	storePreparing
 	storeEvictLeader
+	storeDisconnected
+	storePreparing
+	storeLowSpace
 	groupDegraded
 
 	// groupExpired indicates that the current Group does not generate affinity scheduling and allows other balancing scheduling.
@@ -157,17 +158,13 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 	if len(voters) != len(g.VoterStoreIDs) {
 		return false
 	}
-	expected := make(map[uint64]struct{}, len(voters))
-	for _, voter := range g.VoterStoreIDs {
-		expected[voter] = struct{}{}
+	expected := make([]uint64, len(voters))
+	for i, voter := range voters {
+		expected[i] = voter.GetStoreId()
 	}
-	for _, voter := range voters {
-		if _, ok := expected[voter.GetStoreId()]; !ok {
-			return false
-		}
-	}
+	slices.Sort(expected)
+	return slices.Equal(expected, g.VoterStoreIDs)
 	// TODO: Compare the Learners.
-	return true
 }
 
 // runtimeGroupInfo contains meta information and runtime statistics for the Group.
@@ -252,8 +249,8 @@ func (g *runtimeGroupInfo) IsRegularSchedulingEnabled() bool {
 
 // AdjustGroup validates the group and sets default values.
 func (m *Manager) AdjustGroup(g *Group) error {
-	if g.ID == "" {
-		return errs.ErrAffinityGroupContent.FastGenByArgs("group ID should not be empty")
+	if err := ValidateGroupID(g.ID); err != nil {
+		return err
 	}
 	// TODO: Add more validation logic here if needed.
 	// If no distribution is provided, we will use the default distribution.
@@ -265,28 +262,20 @@ func (m *Manager) AdjustGroup(g *Group) error {
 		return errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided together")
 	}
 
-	if m.storeSetInformer.GetStore(g.LeaderStoreID) == nil {
-		return errs.ErrAffinityGroupContent.FastGenByArgs("leader store does not exist")
+	voterStoreIDs := slices.Clone(g.VoterStoreIDs)
+	slices.Sort(voterStoreIDs)
+	if slice.HasDupSorted(voterStoreIDs) {
+		return errs.ErrAffinityGroupContent.FastGenByArgs("duplicate voter store ID")
 	}
-
-	leaderInVoters := false
-	storeSet := make(map[uint64]struct{})
-	for _, storeID := range g.VoterStoreIDs {
-		if storeID == g.LeaderStoreID {
-			leaderInVoters = true
-		}
-		if _, exists := storeSet[storeID]; exists {
-			return errs.ErrAffinityGroupContent.FastGenByArgs("duplicate voter store ID")
-		}
-		storeSet[storeID] = struct{}{}
-
-		if m.storeSetInformer.GetStore(storeID) == nil {
-			return errs.ErrAffinityGroupContent.FastGenByArgs("voter store does not exist")
-		}
-	}
-	if !leaderInVoters {
+	if !slices.Contains(voterStoreIDs, g.LeaderStoreID) {
 		return errs.ErrAffinityGroupContent.FastGenByArgs("leader must be in voter stores")
 	}
+	for _, storeID := range voterStoreIDs {
+		if m.storeSetInformer.GetStore(storeID) == nil {
+			return errs.ErrAffinityGroupContent.FastGenByArgs("store does not exist")
+		}
+	}
+
 	return nil
 }
 
