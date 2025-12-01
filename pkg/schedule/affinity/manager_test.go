@@ -152,7 +152,7 @@ func TestRegionCountStaleCache(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	ranges := manager.createGroupForTest(re, "g", 1)
+	ranges := manager.createGroupForTest(re, "g", 2)
 	_, err = manager.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
 	re.NoError(err)
 	region := generateRegionForTest(100, []uint64{1, 2, 3}, ranges[0])
@@ -167,10 +167,31 @@ func TestRegionCountStaleCache(t *testing.T) {
 	re.NoError(err)
 	group2 := manager.GetAffinityGroupState("g")
 	re.NotNil(group2)
-
-	// Region cache should be cleared when group changes.
 	re.Zero(group2.AffinityRegionCount)
 	manager.testCacheStale(re, region)
+
+	// Remove key ranges, which bumps AffinityVer and invalidates affinity for the cached region.
+	region = generateRegionForTest(200, []uint64{4, 5, 6}, ranges[0])
+	_, isAffinity = manager.GetRegionAffinityGroupState(region)
+	re.True(isAffinity)
+	groupInfo = manager.getGroupForTest(re, "g")
+	re.Equal(1, groupInfo.AffinityRegionCount)
+	re.Len(groupInfo.Regions, 2)
+	re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{GroupID: "g", KeyRanges: ranges[1:]}}))
+	groupInfo = manager.getGroupForTest(re, "g")
+	re.Equal(0, groupInfo.AffinityRegionCount)
+	re.Len(groupInfo.Regions, 0)
+
+	// Add key ranges, which bumps AffinityVer and invalidates affinity for the cached region.
+	_, isAffinity = manager.GetRegionAffinityGroupState(region)
+	re.True(isAffinity)
+	groupInfo = manager.getGroupForTest(re, "g")
+	re.Equal(1, groupInfo.AffinityRegionCount)
+	re.Len(groupInfo.Regions, 1)
+	re.NoError(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: "g", KeyRanges: ranges[1:]}}, nil))
+	groupInfo = manager.getGroupForTest(re, "g")
+	re.Equal(0, groupInfo.AffinityRegionCount)
+	re.Len(groupInfo.Regions, 1)
 }
 
 // TestDeleteGroupClearsCache verifies that deleting a group clears all related region caches.
