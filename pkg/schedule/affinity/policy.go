@@ -126,13 +126,13 @@ func (m *Manager) generateUnavailableStores() map[uint64]storeCondition {
 	lowSpaceRatio := m.conf.GetLowSpaceRatio()
 	for _, store := range stores {
 		switch {
-		// Check the groupExpired-related storeCondition first
+		// First the conditions that will mark the group as expired
 		case store.IsRemoved() || store.IsPhysicallyDestroyed() || store.IsRemoving():
 			unavailableStores[store.GetID()] = storeRemovingOrRemoved
 		case store.IsUnhealthy():
 			unavailableStores[store.GetID()] = storeDown
 
-		// Then check the groupDegraded-related storeCondition
+		// Then the conditions that will mark the group as degraded
 		case !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()):
 			unavailableStores[store.GetID()] = storeEvictLeader
 		case store.IsDisconnected():
