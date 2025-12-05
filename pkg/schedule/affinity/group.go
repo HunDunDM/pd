@@ -65,20 +65,20 @@ func (a groupAvailability) String() string {
 }
 
 // storeCondition is an enum for store conditions. Valid values are the store-prefixed enum constants,
-// which are split into three groups separated by causeGroupDegraded.
+// which are split into three groups separated by degradedBoundary.
 type storeCondition int
 
 const (
 	storeAvailable storeCondition = iota
 
-	// All values greater than storeAvailable and less than causeGroupDegraded will trigger groupDegraded.
+	// All values greater than storeAvailable and less than degradedBoundary will trigger groupDegraded.
 	storeEvictLeader
 	storeDisconnected
 	storePreparing
 	storeLowSpace
-	causeGroupDegraded
+	degradedBoundary
 
-	// All values greater than causeGroupDegraded will trigger groupExpired.
+	// All values greater than degradedBoundary will trigger groupExpired.
 	storeDown
 	storeRemovingOrRemoved
 )
@@ -108,7 +108,7 @@ func (c storeCondition) groupAvailability() groupAvailability {
 	switch {
 	case c == storeAvailable:
 		return groupAvailable
-	case c <= causeGroupDegraded:
+	case c <= degradedBoundary:
 		return groupDegraded
 	default:
 		return groupExpired
