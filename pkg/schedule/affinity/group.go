@@ -29,7 +29,7 @@ import (
 
 // groupAvailability is an enum that represents the Group’s availability lifecycle.
 // groupAvailable, groupDegraded, and groupExpired define the Group’s availability lifecycle.
-// The groupDegraded status should have an expiration time. After it expires, it should be treated as groupExpired.
+// The groupDegraded status should have an expiration time.
 // Roughly:
 //
 //	groupAvailable ──degraded (e.g. store evict-leader)───────────────> groupDegraded
@@ -41,7 +41,7 @@ import (
 // groupDegraded is intended to be a temporary status that may return to groupAvailable,
 // while groupExpired usually represents a terminal status under the current topology,
 // but can become groupAvailable again after the Group’s stores/peers are reconfigured.
-// groupDegraded has an expiration time (degradedExpiredAt); once it expires, the Group is
+// groupDegraded has an expiration time (degradedExpiredAt). Once it expires, the Group is
 // automatically treated as groupExpired.
 type groupAvailability int
 
