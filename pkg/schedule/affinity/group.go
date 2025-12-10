@@ -306,15 +306,16 @@ func (g *runtimeGroupInfo) SetAvailability(newAvailability groupAvailability) {
 		g.availability = groupExpired
 	}
 	// Update availability
-	if newAvailability == groupDegraded {
+	switch newAvailability {
+	case groupAvailable, groupExpired:
+		g.availability = newAvailability
+	case groupDegraded:
 		// Only set the expiration time when transitioning from groupAvailable to groupDegraded.
 		// Do nothing if the original availability is already groupDegraded or groupExpired.
 		if g.availability == groupAvailable {
 			g.availability = groupDegraded
 			g.degradedExpiredAt = newDegradedExpiredAtFromNow()
 		}
-	} else {
-		g.availability = newAvailability
 	}
 }
 
