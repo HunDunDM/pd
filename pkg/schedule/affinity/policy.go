@@ -247,7 +247,7 @@ func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]store
 		log.Warn("affinity groups invalidated due to unavailable stores",
 			zap.Int("unavailable-store-count", len(unavailableStores)),
 			zap.Int("unavailable-group-count", unavailableGroupCount),
-			zap.Int("available-store-count", availableGroupCount))
+			zap.Int("available-group-count", availableGroupCount))
 	}
 
 	return
