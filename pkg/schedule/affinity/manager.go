@@ -557,9 +557,9 @@ func (m *Manager) SyncKeyRangesFromEtcd(labelRule *labeler.LabelRule) error {
 		// Store LabelRule information in the buffer when it is synchronized before the group.
 		m.labelRuleBuffer[groupID] = labelRule
 		return nil
-	} else {
-		delete(m.labelRuleBuffer, groupID)
 	}
+	// Once group created, the buffer must be deleted.
+	delete(m.labelRuleBuffer, groupID)
 
 	if len(gkr.KeyRanges) > 0 {
 		m.keyRanges[groupID] = gkr
