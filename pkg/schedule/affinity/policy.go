@@ -100,12 +100,18 @@ func (c storeCondition) affectsLeaderOnly() bool {
 	}
 }
 
-// logEntry is used to collect log messages to print after releasing lock
-type logEntry struct {
-	level            string // "info", "warn"
-	groupID          string
-	unavailableStore uint64
-	availability     groupAvailability
+// GetNewAvailability uses the given unavailableStores to compute a new groupAvailability.
+// Note that this function does not update runtimeGroupInfo.
+func (g *runtimeGroupInfo) GetNewAvailability(unavailableStores map[uint64]storeCondition) groupAvailability {
+	maxCondition := storeAvailable
+	for _, storeID := range g.VoterStoreIDs {
+		if condition, ok := unavailableStores[storeID]; ok && (!condition.affectsLeaderOnly() || storeID == g.LeaderStoreID) {
+			if maxCondition == storeAvailable || condition > maxCondition {
+				maxCondition = condition
+			}
+		}
+	}
+	return maxCondition.groupAvailability()
 }
 
 // ObserveAvailableRegion observes available Region and collects information to update the Peer distribution within the Group.
@@ -210,8 +216,9 @@ func (m *Manager) generateUnavailableStores() map[uint64]storeCondition {
 }
 
 func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]storeCondition) (isUnavailableStoresChanged bool, groupAvailabilityChanges map[string]groupAvailability) {
-	var logEntries []logEntry
 	groupAvailabilityChanges = make(map[string]groupAvailability)
+	availableGroupCount := 0
+	unavailableGroupCount := 0
 
 	// Validate whether unavailableStores has changed.
 	m.RLock()
@@ -224,47 +231,23 @@ func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]store
 	// Analyze which Groups have changed availability
 	// Collect log messages to print after releasing lock
 	for _, groupInfo := range m.groups {
-		var unavailableStore uint64
-		var maxCondition storeCondition
-		for _, storeID := range groupInfo.VoterStoreIDs {
-			if condition, ok := unavailableStores[storeID]; ok && (!condition.affectsLeaderOnly() || storeID == groupInfo.LeaderStoreID) {
-				if unavailableStore == 0 || condition > maxCondition {
-					unavailableStore = storeID
-					maxCondition = condition
-				}
-			}
-		}
-		newAvailability := maxCondition.groupAvailability()
+		newAvailability := groupInfo.GetNewAvailability(unavailableStores)
 		if newAvailability != groupInfo.GetAvailability() {
 			groupAvailabilityChanges[groupInfo.ID] = newAvailability
-			if unavailableStore != 0 {
-				logEntries = append(logEntries, logEntry{
-					level:            "warn",
-					groupID:          groupInfo.ID,
-					unavailableStore: unavailableStore,
-					availability:     newAvailability,
-				})
-			} else {
-				logEntries = append(logEntries, logEntry{
-					level:   "info",
-					groupID: groupInfo.ID,
-				})
-			}
+		}
+		if newAvailability == groupAvailable {
+			availableGroupCount++
+		} else {
+			unavailableGroupCount++
 		}
 	}
 	m.RUnlock()
 
-	// Log after releasing lock
-	for _, entry := range logEntries {
-		switch entry.level {
-		case "warn":
-			log.Warn("affinity group invalidated due to unavailable stores",
-				zap.String("group-id", entry.groupID),
-				zap.Uint64("unavailable-store", entry.unavailableStore),
-				zap.String("availability", entry.availability.String()))
-		case "info":
-			log.Info("affinity group become available", zap.String("group-id", entry.groupID))
-		}
+	if len(unavailableStores) > 0 {
+		log.Warn("affinity groups invalidated due to unavailable stores",
+			zap.Int("unavailable-store-count", len(unavailableStores)),
+			zap.Int("unavailable-group-count", unavailableGroupCount),
+			zap.Int("available-store-count", availableGroupCount))
 	}
 
 	return
