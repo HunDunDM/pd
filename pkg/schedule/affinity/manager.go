@@ -73,7 +73,8 @@ type Manager struct {
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
-	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
+	// keyRanges cached in memory to reduce labeler lock contention
+	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges
 	// labelRuleBuffer is a buffer used during etcd synchronization.
 	// When synchronizing via etcd, LabelRule information may arrive earlier than group information.
 	labelRuleBuffer map[string]*labeler.LabelRule
