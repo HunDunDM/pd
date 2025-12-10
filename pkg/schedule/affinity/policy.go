@@ -35,12 +35,6 @@ const (
 	defaultAvailabilityCheckInterval = 10 * time.Second
 )
 
-var (
-	// availabilityCheckIntervalForTest can be set in tests to speed up availability checks.
-	// Default is 0, which means use defaultAvailabilityCheckInterval.
-	availabilityCheckIntervalForTest time.Duration
-)
-
 // storeCondition is an enum for store conditions. Valid values are the store-prefixed enum constants,
 // which are split into three groups separated by degradedBoundary.
 type storeCondition int
