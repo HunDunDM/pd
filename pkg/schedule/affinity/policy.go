@@ -40,6 +40,66 @@ var (
 	availabilityCheckIntervalForTest time.Duration
 )
 
+// storeCondition is an enum for store conditions. Valid values are the store-prefixed enum constants,
+// which are split into three groups separated by degradedBoundary.
+type storeCondition int
+
+const (
+	storeAvailable storeCondition = iota
+
+	// All values greater than storeAvailable and less than degradedBoundary will trigger groupDegraded.
+	storeEvictLeader
+	storeDisconnected
+	storePreparing
+	storeLowSpace
+	degradedBoundary
+
+	// All values greater than degradedBoundary will trigger groupExpired.
+	storeDown
+	storeRemovingOrRemoved
+)
+
+func (c storeCondition) String() string {
+	switch c {
+	case storeAvailable:
+		return "available"
+	case storeEvictLeader:
+		return "evicted"
+	case storeDisconnected:
+		return "disconnected"
+	case storePreparing:
+		return "preparing"
+	case storeLowSpace:
+		return "low-space"
+	case storeDown:
+		return "down"
+	case storeRemovingOrRemoved:
+		return "removing-or-removed"
+	default:
+		return "unknown"
+	}
+}
+
+func (c storeCondition) groupAvailability() groupAvailability {
+	switch {
+	case c == storeAvailable:
+		return groupAvailable
+	case c <= degradedBoundary:
+		return groupDegraded
+	default:
+		return groupExpired
+	}
+}
+
+func (c storeCondition) affectsLeaderOnly() bool {
+	switch c {
+	case storeEvictLeader:
+		return true
+	default:
+		return false
+	}
+}
+
 // logEntry is used to collect log messages to print after releasing lock
 type logEntry struct {
 	level            string // "info", "warn"
