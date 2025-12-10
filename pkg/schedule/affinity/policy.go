@@ -77,6 +77,7 @@ func SetAvailabilityCheckIntervalForTest(interval time.Duration) {
 }
 
 // startAvailabilityCheckLoop starts a goroutine to periodically check store availability and invalidate groups with unavailable stores.
+// TODO: If critical operations are added, a graceful shutdown is required.
 func (m *Manager) startAvailabilityCheckLoop() {
 	interval := getAvailabilityCheckInterval()
 	ticker := time.NewTicker(interval)
@@ -218,7 +219,7 @@ func (m *Manager) setGroupAvailabilityChanges(unavailableStores map[uint64]store
 	}
 }
 
-func (m *Manager) hasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint64) error {
+func (m *Manager) checkHasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint64) error {
 	m.RLock()
 	defer m.RUnlock()
 	for _, storeID := range voterStoreIDs {
