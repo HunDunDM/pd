@@ -381,7 +381,7 @@ func TestAvailabilityChangeRegionCount(t *testing.T) {
 	storeInfos.PutStore(store2Down)
 
 	// Trigger availability check
-	manager.checkStoresAvailability()
+	manager.checkGroupsAvailability()
 
 	// Verify group state changed
 	groupInfo := getGroupForTest(re, manager, "availability-test")
@@ -552,7 +552,7 @@ func TestConcurrentOperations(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range 20 {
-			manager.checkStoresAvailability()
+			manager.checkGroupsAvailability()
 			time.Sleep(2 * time.Millisecond)
 		}
 	}()
@@ -609,7 +609,7 @@ func TestDegradedExpiration(t *testing.T) {
 	store2 := storeInfos.GetStore(2)
 	store2Down := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
 	storeInfos.PutStore(store2Down)
-	manager.checkStoresAvailability()
+	manager.checkGroupsAvailability()
 
 	// Verify group became degraded
 	groupInfo := getGroupForTest(re, manager, "expiration-test")
@@ -632,7 +632,7 @@ func TestDegradedExpiration(t *testing.T) {
 	manager.Unlock()
 
 	// Run availability check again
-	manager.checkStoresAvailability()
+	manager.checkGroupsAvailability()
 
 	// Verify group is now expired
 	re.True(groupInfo.IsExpired())

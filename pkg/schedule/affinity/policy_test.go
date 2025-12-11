@@ -225,7 +225,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	re.True(groupInfo2.IsAffinitySchedulingEnabled())
 
 	// Manually call checkStoreHealth to test
-	manager.checkStoresAvailability()
+	manager.checkGroupsAvailability()
 
 	// After health check, group1 should still be in effect (all stores healthy)
 	re.True(manager.groups["group1"].IsAffinitySchedulingEnabled())
@@ -238,7 +238,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	storeInfos.PutStore(store3Healthy)
 
 	// Check health again
-	manager.checkStoresAvailability()
+	manager.checkGroupsAvailability()
 
 	// Group2 should be restored to effect state
 	re.True(manager.groups["group2"].IsAffinitySchedulingEnabled())
@@ -272,14 +272,14 @@ func TestDegradedGroupShouldExpire(t *testing.T) {
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "expire"}}))
 	_, err = manager.UpdateAffinityGroupPeers("expire", 1, []uint64{1, 2})
 	re.NoError(err)
-	manager.checkStoresAvailability()
+	manager.checkGroupsAvailability()
 	groupInfo := getGroupForTest(re, manager, "expire")
 	re.Equal(groupAvailable, groupInfo.GetAvailability())
 
 	// Make store2 unhealthy so the group becomes degraded.
 	store2Disconnected := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
 	storeInfos.PutStore(store2Disconnected)
-	manager.checkStoresAvailability()
+	manager.checkGroupsAvailability()
 	groupInfo = getGroupForTest(re, manager, "expire")
 	re.Equal(groupDegraded, groupInfo.GetAvailability())
 
@@ -289,7 +289,7 @@ func TestDegradedGroupShouldExpire(t *testing.T) {
 	manager.Unlock()
 
 	// Run availability check again without changing the unavailable store set.
-	manager.checkStoresAvailability()
+	manager.checkGroupsAvailability()
 	re.True(groupInfo.IsExpired())
 }
 
