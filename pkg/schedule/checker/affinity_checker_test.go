@@ -16,6 +16,7 @@ package checker
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -2280,4 +2281,58 @@ func TestAffinityMergeCheckLabelerSplitKeys(t *testing.T) {
 	re.NotNil(groupState)
 	ops := checker.MergeCheck(region1, groupState)
 	re.Nil(ops, "Should not merge when region labeler requires split")
+}
+
+func TestCloneRegionWithPeerStores(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := newAffinityTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+
+	tc.AddRegionStore(1, 1)
+	tc.AddRegionStore(2, 1)
+	tc.AddRegionStore(3, 1)
+
+	// Current: voters on [1, 2, 3], leader on 1
+	tc.AddLeaderRegion(100, 1, 2, 3)
+	region := tc.GetRegion(100)
+
+	// failure: voters on [1, 2], leader on 1
+	re.Nil(cloneRegionWithPeerStores(region, 1, 1, 2))
+
+	// failure: voters on [1, 2, 3, 4], leader on 1
+	re.Nil(cloneRegionWithPeerStores(region, 1, 1, 2, 3, 4))
+
+	// failure: voters on [1, 2, 3], leader on 4
+	re.Nil(cloneRegionWithPeerStores(region, 4, 1, 2, 3))
+
+	// success: voters on [3, 2, 1], leader on 3
+	targetRegion := cloneRegionWithPeerStores(region, 3, 3, 2, 1)
+	re.NotNil(targetRegion)
+	re.Equal(3, targetRegion.GetLeader().GetStoreId())
+	storeIDsEq(re, []uint64{3, 2, 1}, targetRegion.GetVoters())
+
+	// success: voters on [4, 1, 2], leader on 2
+	targetRegion = cloneRegionWithPeerStores(region, 2, 4, 1, 2)
+	re.NotNil(targetRegion)
+	re.Equal(2, targetRegion.GetLeader().GetStoreId())
+	storeIDsEq(re, []uint64{4, 1, 2}, targetRegion.GetVoters())
+
+	// success: voters on [4, 5, 6], leader on 4
+	targetRegion = cloneRegionWithPeerStores(region, 4, 4, 5, 6)
+	re.NotNil(targetRegion)
+	re.Equal(4, targetRegion.GetLeader().GetStoreId())
+	storeIDsEq(re, []uint64{4, 5, 6}, targetRegion.GetVoters())
+}
+
+func storeIDsEq(re *require.Assertions, targetStoreIDs []uint64, peers []*metapb.Peer) {
+	storeIDs := make([]uint64, len(targetStoreIDs))
+	for i, peer := range peers {
+		storeIDs[i] = peer.GetStoreId()
+	}
+	slices.Sort(storeIDs)
+	slices.Sort(targetStoreIDs)
+	re.True(slices.Equal(targetStoreIDs, storeIDs))
 }
