@@ -150,7 +150,7 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	re.True(state.AffinitySchedulingEnabled)
 
 	// Simulate store 2 unavailable.
-	unavailable := map[uint64]storeCondition{2: storeRemovingOrRemoved}
+	unavailable := map[uint64]storeCondition{2: storeRemoved}
 	isUnavailableStoresChanged, groupAvailabilityChanges := manager.getGroupAvailabilityChanges(unavailable)
 	re.True(isUnavailableStoresChanged)
 	manager.setGroupAvailabilityChanges(unavailable, groupAvailabilityChanges)
@@ -339,8 +339,8 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 	_, err = manager.UpdateAffinityGroupPeers("priority", 1, []uint64{1, 2})
 	re.NoError(err)
 	unavailable = map[uint64]storeCondition{
-		1: storeDisconnected,      // degraded
-		2: storeRemovingOrRemoved, // expired
+		1: storeDisconnected, // degraded
+		2: storeRemoved,      // expired
 	}
 	changed, changes = manager.getGroupAvailabilityChanges(unavailable)
 	re.True(changed)

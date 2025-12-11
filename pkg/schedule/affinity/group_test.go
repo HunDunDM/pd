@@ -36,7 +36,8 @@ func TestStoreCondition(t *testing.T) {
 	re.Equal(groupDegraded, storeEvictLeader.groupAvailability())
 	re.Equal(groupDegraded, storeLowSpace.groupAvailability())
 	re.Equal(groupExpired, storeDown.groupAvailability())
-	re.Equal(groupExpired, storeRemovingOrRemoved.groupAvailability())
+	re.Equal(groupExpired, storeRemoving.groupAvailability())
+	re.Equal(groupExpired, storeRemoved.groupAvailability())
 
 	re.True(storeEvictLeader.affectsLeaderOnly())
 	re.False(storeDisconnected.affectsLeaderOnly())

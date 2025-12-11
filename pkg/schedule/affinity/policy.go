@@ -37,6 +37,7 @@ const (
 
 // storeCondition is an enum for store conditions. Valid values are the store-prefixed enum constants,
 // which are split into three groups separated by degradedBoundary.
+// Roughly, larger values indicate a more severe degree of unavailability.
 type storeCondition int
 
 const (
@@ -51,7 +52,8 @@ const (
 
 	// All values greater than degradedBoundary will trigger groupExpired.
 	storeDown
-	storeRemovingOrRemoved
+	storeRemoving
+	storeRemoved
 )
 
 func (c storeCondition) String() string {
@@ -68,8 +70,10 @@ func (c storeCondition) String() string {
 		return "low-space"
 	case storeDown:
 		return "down"
-	case storeRemovingOrRemoved:
-		return "removing-or-removed"
+	case storeRemoving:
+		return "removing"
+	case storeRemoved:
+		return "removed"
 	default:
 		return "unknown"
 	}
@@ -179,8 +183,10 @@ func (m *Manager) generateUnavailableStores() map[uint64]storeCondition {
 	for _, store := range stores {
 		switch {
 		// First the conditions that will mark the group as expired
-		case store.IsRemoved() || store.IsPhysicallyDestroyed() || store.IsRemoving():
-			unavailableStores[store.GetID()] = storeRemovingOrRemoved
+		case store.IsRemoved() || store.IsPhysicallyDestroyed():
+			unavailableStores[store.GetID()] = storeRemoved
+		case store.IsRemoving():
+			unavailableStores[store.GetID()] = storeRemoving
 		case store.IsUnhealthy():
 			unavailableStores[store.GetID()] = storeDown
 
