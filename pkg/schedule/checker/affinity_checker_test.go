@@ -214,7 +214,7 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	// Verify group is in effect initially
 	groupInfo := affinityManager.GetAffinityGroupState("test_group")
 	re.NotNil(groupInfo)
-	re.True(groupInfo.AffinitySchedulingEnabled)
+	re.True(groupInfo.AffinitySchedulingAllowed)
 	re.Equal(affinity.PhasePreparing, groupInfo.Phase)
 
 	// For cases where the Region and Group voter store IDs do not fully overlap.
@@ -245,7 +245,7 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	affinityManager.DegradeAffinityGroup("test_group")
 	// If the voter store IDs remain unchanged, a valid Region will cause the Group to restore.
 	ops = affinityChecker.Check(tc.GetRegion(200))
-	re.True(affinityManager.GetAffinityGroupState("test_group").AffinitySchedulingEnabled)
+	re.True(affinityManager.GetAffinityGroupState("test_group").AffinitySchedulingAllowed)
 	re.Nil(ops, "Checker should not create operator for same peers")
 }
 
@@ -282,7 +282,7 @@ func TestAffinityAvailabilityCheckWithOfflineStore(t *testing.T) {
 	// Verify group is in effect
 	groupInfo := affinityManager.GetAffinityGroupState("test_group")
 	re.NotNil(groupInfo)
-	re.True(groupInfo.AffinitySchedulingEnabled)
+	re.True(groupInfo.AffinitySchedulingAllowed)
 	re.Equal(affinity.PhasePreparing, groupInfo.Phase)
 
 	// Set store 2 offline (this triggers IsRemoving())
@@ -291,12 +291,12 @@ func TestAffinityAvailabilityCheckWithOfflineStore(t *testing.T) {
 	// Wait for health check to run
 	testutil.Eventually(re, func() bool {
 		groupInfo = affinityManager.GetAffinityGroupState("test_group")
-		return groupInfo != nil && !groupInfo.AffinitySchedulingEnabled
+		return groupInfo != nil && !groupInfo.AffinitySchedulingAllowed
 	})
 
 	// Group should be invalidated because store 2 is removing
 	re.NotNil(groupInfo)
-	re.False(groupInfo.AffinitySchedulingEnabled, "Group should be invalidated when store is removing")
+	re.False(groupInfo.AffinitySchedulingAllowed, "Group should be invalidated when store is removing")
 	re.Equal(affinity.PhasePending, groupInfo.Phase)
 }
 
@@ -338,12 +338,12 @@ func TestAffinityAvailabilityCheckWithDownStores(t *testing.T) {
 	var groupInfo *affinity.GroupState
 	testutil.Eventually(re, func() bool {
 		groupInfo = affinityManager.GetAffinityGroupState("test_group")
-		return groupInfo != nil && !groupInfo.AffinitySchedulingEnabled
+		return groupInfo != nil && !groupInfo.AffinitySchedulingAllowed
 	})
 
 	// Group should be invalidated
 	re.NotNil(groupInfo)
-	re.False(groupInfo.AffinitySchedulingEnabled, "Group should be invalidated when stores are down")
+	re.False(groupInfo.AffinitySchedulingAllowed, "Group should be invalidated when stores are down")
 	re.Equal(affinity.PhasePending, groupInfo.Phase)
 
 	// Recover store 2 (store 3 still down)
@@ -354,12 +354,12 @@ func TestAffinityAvailabilityCheckWithDownStores(t *testing.T) {
 	// Wait for health check - group should still be invalidated
 	testutil.Eventually(re, func() bool {
 		groupInfo = affinityManager.GetAffinityGroupState("test_group")
-		return groupInfo != nil && !groupInfo.AffinitySchedulingEnabled
+		return groupInfo != nil && !groupInfo.AffinitySchedulingAllowed
 	})
 
 	// Group should still be invalidated (store 3 still down)
 	re.NotNil(groupInfo)
-	re.False(groupInfo.AffinitySchedulingEnabled, "Group should remain invalidated while any store is unhealthy")
+	re.False(groupInfo.AffinitySchedulingAllowed, "Group should remain invalidated while any store is unhealthy")
 	re.Equal(affinity.PhasePending, groupInfo.Phase)
 
 	// Recover store 3
@@ -383,7 +383,7 @@ func TestAffinityAvailabilityCheckWithDownStores(t *testing.T) {
 	groupInfo, isAffinity := affinityManager.GetRegionAffinityGroupState(region)
 	re.True(isAffinity)
 	re.NotNil(groupInfo)
-	re.True(groupInfo.AffinitySchedulingEnabled, "Group should be restored when all stores are healthy")
+	re.True(groupInfo.AffinitySchedulingAllowed, "Group should be restored when all stores are healthy")
 	re.Equal(affinity.PhasePreparing, groupInfo.Phase)
 }
 
@@ -1914,11 +1914,11 @@ func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 	var groupState *affinity.GroupState
 	testutil.Eventually(re, func() bool {
 		groupState = affinityManager.GetAffinityGroupState("test_group")
-		return groupState != nil && !groupState.AffinitySchedulingEnabled
+		return groupState != nil && !groupState.AffinitySchedulingAllowed
 	})
 
 	re.NotNil(groupState)
-	re.False(groupState.AffinitySchedulingEnabled)
+	re.False(groupState.AffinitySchedulingAllowed)
 	re.Equal(affinity.PhasePending, groupState.Phase)
 
 	ops := checker.Check(tc.GetRegion(1))
@@ -1963,7 +1963,7 @@ func TestAffinityCheckerExpireGroupWhenPlacementRuleMismatch(t *testing.T) {
 
 	groupState := affinityManager.GetAffinityGroupState("test_group")
 	re.NotNil(groupState)
-	re.False(groupState.AffinitySchedulingEnabled, "Group should be expired when peer count violates placement rules")
+	re.False(groupState.AffinitySchedulingAllowed, "Group should be expired when peer count violates placement rules")
 	re.Equal(affinity.PhasePending, groupState.Phase)
 	re.Equal([]uint64{1, 2, 3, 4}, groupState.VoterStoreIDs, "Peers remain as configured until a valid available region is observed")
 }

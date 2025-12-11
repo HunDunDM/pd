@@ -101,7 +101,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// In some cases, the Group must be updated via ObserveAvailableRegion and then fetched again.
 	needRefetch := false
-	if group.AffinitySchedulingEnabled {
+	if group.AffinitySchedulingAllowed {
 		// If the Group is affinity scheduling allowed and the Region is not in the affinity state,
 		// we expect to schedule the Region to match the Group’s peers.
 		// Before doing so, check whether the Group’s peers are replicated.
@@ -121,7 +121,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		c.affinityManager.ObserveAvailableRegion(region, group)
 		group, isAffinity = c.affinityManager.GetRegionAffinityGroupState(region)
 	}
-	if group == nil || !group.AffinitySchedulingEnabled {
+	if group == nil || !group.AffinitySchedulingAllowed {
 		affinityCheckerGroupSchedulingDisabledCounter.Inc()
 		return nil
 	}

@@ -66,7 +66,7 @@ func TestObserveAvailableRegion(t *testing.T) {
 	manager.ObserveAvailableRegion(region1, manager.GetAffinityGroupState("g"))
 	state := manager.GetAffinityGroupState("g")
 	re.NotNil(state)
-	re.True(state.AffinitySchedulingEnabled)
+	re.True(state.AffinitySchedulingAllowed)
 	re.Equal(uint64(1), state.LeaderStoreID)
 	re.ElementsMatch([]uint64{1}, state.VoterStoreIDs)
 
@@ -83,7 +83,7 @@ func TestObserveAvailableRegion(t *testing.T) {
 	manager.ObserveAvailableRegion(region2, manager.GetAffinityGroupState("g"))
 	state = manager.GetAffinityGroupState("g")
 	re.NotNil(state)
-	re.True(state.AffinitySchedulingEnabled)
+	re.True(state.AffinitySchedulingAllowed)
 	re.Equal(uint64(1), state.LeaderStoreID)
 	re.ElementsMatch([]uint64{1}, state.VoterStoreIDs)
 
@@ -91,31 +91,31 @@ func TestObserveAvailableRegion(t *testing.T) {
 	manager.DegradeAffinityGroup("g")
 	state = manager.GetAffinityGroupState("g")
 	re.NotNil(state)
-	re.False(state.AffinitySchedulingEnabled)
-	re.False(state.RegularSchedulingEnabled)
+	re.False(state.AffinitySchedulingAllowed)
+	re.False(state.RegularSchedulingAllowed)
 
 	manager.ObserveAvailableRegion(region2, state) // region2 changes voter store IDs
 	state = manager.GetAffinityGroupState("g")
 	re.NotNil(state)
-	re.False(state.AffinitySchedulingEnabled)
-	re.False(state.RegularSchedulingEnabled)
+	re.False(state.AffinitySchedulingAllowed)
+	re.False(state.RegularSchedulingAllowed)
 
 	manager.ObserveAvailableRegion(region1, state) // region1 does not change voter store IDs
 	state = manager.GetAffinityGroupState("g")
 	re.NotNil(state)
-	re.True(state.AffinitySchedulingEnabled)
+	re.True(state.AffinitySchedulingAllowed)
 
 	// An expired group can change voterStoreIDs.
 	manager.ExpireAffinityGroup("g")
 	state = manager.GetAffinityGroupState("g")
 	re.NotNil(state)
-	re.False(state.AffinitySchedulingEnabled)
-	re.True(state.RegularSchedulingEnabled)
+	re.False(state.AffinitySchedulingAllowed)
+	re.True(state.RegularSchedulingAllowed)
 
 	manager.ObserveAvailableRegion(region2, state) // region2 changes voter store IDs
 	state = manager.GetAffinityGroupState("g")
 	re.NotNil(state)
-	re.True(state.AffinitySchedulingEnabled)
+	re.True(state.AffinitySchedulingAllowed)
 }
 
 func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
@@ -147,7 +147,7 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	re.NoError(err)
 	state := manager.GetAffinityGroupState("avail")
 	re.NotNil(state)
-	re.True(state.AffinitySchedulingEnabled)
+	re.True(state.AffinitySchedulingAllowed)
 
 	// Simulate store 2 unavailable.
 	unavailable := map[uint64]storeCondition{2: storeRemoved}
@@ -157,7 +157,7 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 
 	state2 := manager.GetAffinityGroupState("avail")
 	re.NotNil(state2)
-	re.False(state2.AffinitySchedulingEnabled)
+	re.False(state2.AffinitySchedulingAllowed)
 }
 
 func TestStoreHealthCheck(t *testing.T) {
@@ -220,18 +220,18 @@ func TestStoreHealthCheck(t *testing.T) {
 
 	// Verify initial state - all groups should be in effect
 	groupInfo1 := manager.groups["group1"]
-	re.True(groupInfo1.IsAffinitySchedulingEnabled())
+	re.True(groupInfo1.IsAffinitySchedulingAllowed())
 	groupInfo2 := manager.groups["group2"]
-	re.True(groupInfo2.IsAffinitySchedulingEnabled())
+	re.True(groupInfo2.IsAffinitySchedulingAllowed())
 
 	// Manually call checkStoreHealth to test
 	manager.checkGroupsAvailability()
 
 	// After health check, group1 should still be in effect (all stores healthy)
-	re.True(manager.groups["group1"].IsAffinitySchedulingEnabled())
+	re.True(manager.groups["group1"].IsAffinitySchedulingAllowed())
 
 	// After health check, group2 should be invalidated (store3 is unhealthy)
-	re.False(manager.groups["group2"].IsAffinitySchedulingEnabled())
+	re.False(manager.groups["group2"].IsAffinitySchedulingAllowed())
 
 	// Now make store3 healthy again
 	store3Healthy := store3.Clone(core.SetLastHeartbeatTS(time.Now()))
@@ -241,7 +241,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	manager.checkGroupsAvailability()
 
 	// Group2 should be restored to effect state
-	re.True(manager.groups["group2"].IsAffinitySchedulingEnabled())
+	re.True(manager.groups["group2"].IsAffinitySchedulingAllowed())
 }
 
 // TestDegradedGroupShouldExpire verifies a degraded group should move to expired even when

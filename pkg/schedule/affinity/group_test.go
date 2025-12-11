@@ -52,7 +52,7 @@ func TestGroupState(t *testing.T) {
 			LeaderStoreID: 1,
 			VoterStoreIDs: []uint64{1, 2, 3},
 		},
-		AffinitySchedulingEnabled: true,
+		AffinitySchedulingAllowed: true,
 	}
 	// keyRange is unused in this test.
 	region := generateRegionForTest(100, []uint64{1, 2, 3}, nonOverlappingRange)
@@ -62,7 +62,7 @@ func TestGroupState(t *testing.T) {
 	region = generateRegionForTest(100, []uint64{1, 2, 4}, nonOverlappingRange)
 	re.False(group.isRegionAffinity(region))
 
-	group.AffinitySchedulingEnabled = false
+	group.AffinitySchedulingAllowed = false
 	region = generateRegionForTest(100, []uint64{1, 2, 3}, nonOverlappingRange)
 	re.False(group.isRegionAffinity(region))
 }
