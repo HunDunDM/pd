@@ -16,6 +16,7 @@ package checker
 
 import (
 	"bytes"
+	"slices"
 
 	"go.uber.org/zap"
 
@@ -403,22 +404,44 @@ func (c *AffinityChecker) allowAffinityMerge(region, adjacent *core.RegionInfo) 
 // If the number of voters does not match or the leader is not among the target voters,
 // it returns nil to indicate failure.
 func cloneRegionWithPeerStores(region *core.RegionInfo, leaderStoreID uint64, voterStoreIDs ...uint64) *core.RegionInfo {
-	voters := region.GetVoters()
+	sourceVoters := region.GetVoters()
 
-	if len(voters) != len(voterStoreIDs) {
+	if len(sourceVoters) != len(voterStoreIDs) {
 		return nil
 	}
 
-	options := make([]core.RegionCreateOption, 0, len(voters)+1)
-	for i, voterStoreID := range voterStoreIDs {
-		options = append(options, core.WithReplacePeerStore(voters[i].GetStoreId(), voterStoreID))
-		if leaderStoreID == voterStoreID {
-			options = append(options, core.WithLeader(voters[i]))
+	if !slices.Contains(voterStoreIDs, leaderStoreID) {
+		return nil
+	}
+
+	// presence records whether a storeID exists in the source and/or target:
+	//   - 1(0b01) if only in source
+	//   - 2(0b10) if only in target
+	//   - 3(0b11) if in both
+	presences := make(map[uint64]int, len(sourceVoters)+len(voterStoreIDs))
+	for _, voter := range sourceVoters {
+		presences[voter.GetStoreId()] |= 1
+	}
+	for _, voterStoreID := range voterStoreIDs {
+		presences[voterStoreID] |= 2
+	}
+
+	sourceOnly := make([]uint64, 0, len(sourceVoters))
+	targetOnly := make([]uint64, 0, len(voterStoreIDs))
+	for storeID, presence := range presences {
+		switch presence {
+		case 1:
+			sourceOnly = append(sourceOnly, storeID)
+		case 2:
+			targetOnly = append(targetOnly, storeID)
 		}
 	}
-	if len(options) != len(voters)+1 {
-		return nil
+
+	options := make([]core.RegionCreateOption, 0, len(sourceOnly)+1)
+	for i, sourceStoreID := range sourceOnly {
+		options = append(options, core.WithReplacePeerStore(sourceStoreID, targetOnly[i]))
 	}
+	options = append(options, core.WithLeaderStore(leaderStoreID))
 
 	return region.Clone(options...)
 }

@@ -2311,19 +2311,19 @@ func TestCloneRegionWithPeerStores(t *testing.T) {
 	// success: voters on [3, 2, 1], leader on 3
 	targetRegion := cloneRegionWithPeerStores(region, 3, 3, 2, 1)
 	re.NotNil(targetRegion)
-	re.Equal(3, targetRegion.GetLeader().GetStoreId())
+	re.Equal(uint64(3), targetRegion.GetLeader().GetStoreId())
 	storeIDsEq(re, []uint64{3, 2, 1}, targetRegion.GetVoters())
 
 	// success: voters on [4, 1, 2], leader on 2
 	targetRegion = cloneRegionWithPeerStores(region, 2, 4, 1, 2)
 	re.NotNil(targetRegion)
-	re.Equal(2, targetRegion.GetLeader().GetStoreId())
+	re.Equal(uint64(2), targetRegion.GetLeader().GetStoreId())
 	storeIDsEq(re, []uint64{4, 1, 2}, targetRegion.GetVoters())
 
 	// success: voters on [4, 5, 6], leader on 4
 	targetRegion = cloneRegionWithPeerStores(region, 4, 4, 5, 6)
 	re.NotNil(targetRegion)
-	re.Equal(4, targetRegion.GetLeader().GetStoreId())
+	re.Equal(uint64(4), targetRegion.GetLeader().GetStoreId())
 	storeIDsEq(re, []uint64{4, 5, 6}, targetRegion.GetVoters())
 }
 
