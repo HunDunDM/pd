@@ -87,7 +87,7 @@ func (w *Watcher) initializeGroupWatcher() error {
 		log.Info("update affinity group", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 		group := &affinity.Group{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
-			log.Error("failed to unmarshal affinity group", zap.String("key", string(kv.Key)), zap.Error(err))
+			log.Warn("failed to unmarshal affinity group", zap.String("key", string(kv.Key)), zap.Error(err))
 			return err
 		}
 		w.affinityManager.SyncGroupFromEtcd(group)
@@ -130,7 +130,7 @@ func (w *Watcher) initializeAffinityLabelWatcher() error {
 		log.Info("update affinity label rule", zap.String("key", key), zap.String("value", string(kv.Value)))
 		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
 		if err != nil {
-			log.Error("failed to unmarshal affinity label rule", zap.String("key", key), zap.Error(err))
+			log.Warn("failed to unmarshal affinity label rule", zap.String("key", key), zap.Error(err))
 			return err
 		}
 		return w.affinityManager.SyncKeyRangesFromEtcd(rule)
