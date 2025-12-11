@@ -332,6 +332,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 		return
 	}
+	// TODO: check whether leader store ID and voter store IDs are healthy and fit the group.
 	if req.LeaderStoreID == 0 || len(req.VoterStoreIDs) == 0 {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupContent.GenWithStackByArgs("leader_store_id and voter_store_ids are required").Error())
 		return
