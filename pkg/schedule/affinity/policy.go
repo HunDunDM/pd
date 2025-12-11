@@ -232,7 +232,7 @@ func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]store
 			continue
 		}
 
-		//
+		// Only Groups in the available or degraded status can be changed automatically.
 		newAvailability := calcGroupAvailability(unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
 		if availability != newAvailability {
 			groupAvailabilityChanges[groupInfo.ID] = newAvailability
