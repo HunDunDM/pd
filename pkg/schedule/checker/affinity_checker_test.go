@@ -2327,12 +2327,12 @@ func TestCloneRegionWithPeerStores(t *testing.T) {
 	storeIDsEq(re, []uint64{4, 5, 6}, targetRegion.GetVoters())
 }
 
-func storeIDsEq(re *require.Assertions, targetStoreIDs []uint64, peers []*metapb.Peer) {
-	storeIDs := make([]uint64, len(targetStoreIDs))
+func storeIDsEq(re *require.Assertions, expectedStoreIDs []uint64, peers []*metapb.Peer) {
+	storeIDs := make([]uint64, len(expectedStoreIDs))
 	for i, peer := range peers {
 		storeIDs[i] = peer.GetStoreId()
 	}
 	slices.Sort(storeIDs)
-	slices.Sort(targetStoreIDs)
-	re.True(slices.Equal(targetStoreIDs, storeIDs))
+	slices.Sort(expectedStoreIDs)
+	re.True(slices.Equal(expectedStoreIDs, storeIDs))
 }
