@@ -109,7 +109,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		// If not, the Group information should be expired (e.g. due to Placement Rules changes),
 		// so expire the group first, then provide the available Region information and fetch the Group state again.
 		if !isAffinity {
-			targetRegion := cloneRegionWithPeerStores(region, group.LeaderStoreID, group.VoterStoreIDs...)
+			targetRegion := cloneRegionWithReplacePeerStores(region, group.LeaderStoreID, group.VoterStoreIDs...)
 			if targetRegion == nil || !filter.IsRegionReplicated(c.cluster, targetRegion) {
 				c.affinityManager.ExpireAffinityGroup(group.ID)
 				needRefetch = true
@@ -400,10 +400,10 @@ func (c *AffinityChecker) allowAffinityMerge(region, adjacent *core.RegionInfo) 
 	return true
 }
 
-// cloneRegionWithPeerStores clones the Region and updates its voters and leader to the target stores.
+// cloneRegionWithReplacePeerStores clones the Region and updates its voters and leader to the target stores.
 // If the number of voters does not match or the leader is not among the target voters,
-// it returns nil to indicate failure.
-func cloneRegionWithPeerStores(region *core.RegionInfo, leaderStoreID uint64, voterStoreIDs ...uint64) *core.RegionInfo {
+// it returns nil to indicate failure. Source and target placement must not contain duplicate store IDs respectively.
+func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uint64, voterStoreIDs ...uint64) *core.RegionInfo {
 	sourceVoters := region.GetVoters()
 
 	if len(sourceVoters) != len(voterStoreIDs) {

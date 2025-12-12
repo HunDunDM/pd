@@ -2300,28 +2300,28 @@ func TestCloneRegionWithPeerStores(t *testing.T) {
 	region := tc.GetRegion(100)
 
 	// failure: voters on [1, 2], leader on 1
-	re.Nil(cloneRegionWithPeerStores(region, 1, 1, 2))
+	re.Nil(cloneRegionWithReplacePeerStores(region, 1, 1, 2))
 
 	// failure: voters on [1, 2, 3, 4], leader on 1
-	re.Nil(cloneRegionWithPeerStores(region, 1, 1, 2, 3, 4))
+	re.Nil(cloneRegionWithReplacePeerStores(region, 1, 1, 2, 3, 4))
 
 	// failure: voters on [1, 2, 3], leader on 4
-	re.Nil(cloneRegionWithPeerStores(region, 4, 1, 2, 3))
+	re.Nil(cloneRegionWithReplacePeerStores(region, 4, 1, 2, 3))
 
 	// success: voters on [3, 2, 1], leader on 3
-	targetRegion := cloneRegionWithPeerStores(region, 3, 3, 2, 1)
+	targetRegion := cloneRegionWithReplacePeerStores(region, 3, 3, 2, 1)
 	re.NotNil(targetRegion)
 	re.Equal(uint64(3), targetRegion.GetLeader().GetStoreId())
 	storeIDsEq(re, []uint64{3, 2, 1}, targetRegion.GetVoters())
 
 	// success: voters on [4, 1, 2], leader on 2
-	targetRegion = cloneRegionWithPeerStores(region, 2, 4, 1, 2)
+	targetRegion = cloneRegionWithReplacePeerStores(region, 2, 4, 1, 2)
 	re.NotNil(targetRegion)
 	re.Equal(uint64(2), targetRegion.GetLeader().GetStoreId())
 	storeIDsEq(re, []uint64{4, 1, 2}, targetRegion.GetVoters())
 
 	// success: voters on [4, 5, 6], leader on 4
-	targetRegion = cloneRegionWithPeerStores(region, 4, 4, 5, 6)
+	targetRegion = cloneRegionWithReplacePeerStores(region, 4, 4, 5, 6)
 	re.NotNil(targetRegion)
 	re.Equal(uint64(4), targetRegion.GetLeader().GetStoreId())
 	storeIDsEq(re, []uint64{4, 5, 6}, targetRegion.GetVoters())
