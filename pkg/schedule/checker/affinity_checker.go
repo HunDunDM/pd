@@ -260,7 +260,8 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 
 // MergeCheck verifies if a region can be merged with its adjacent regions within the same affinity group.
 // It follows similar logic to merge_checker but with affinity-specific constraints:
-// - Does NOT skip recently split or recently started regions (as requested)
+// - Does NOT skip recently split or recently started regions
+// - Does NOT skip hot spots regions
 // - Only merges regions within the same affinity group
 func (c *AffinityChecker) MergeCheck(region *core.RegionInfo, group *affinity.GroupState) []*operator.Operator {
 	maxAffinityMergeRegionSize := c.conf.GetMaxAffinityMergeRegionSize()
@@ -404,13 +405,13 @@ func (c *AffinityChecker) allowAffinityMerge(region, adjacent *core.RegionInfo) 
 // If the number of voters does not match or the leader is not among the target voters,
 // it returns nil to indicate failure. Source and target placement must not contain duplicate store IDs respectively.
 func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uint64, voterStoreIDs ...uint64) *core.RegionInfo {
-	sourceVoters := region.GetVoters()
-
-	if len(sourceVoters) != len(voterStoreIDs) {
+	if region == nil {
 		return nil
 	}
 
-	if !slices.Contains(voterStoreIDs, leaderStoreID) {
+	sourceVoters := region.GetVoters()
+
+	if len(sourceVoters) != len(voterStoreIDs) || !slices.Contains(voterStoreIDs, leaderStoreID) {
 		return nil
 	}
 
