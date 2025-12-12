@@ -386,6 +386,7 @@ func WithLeaderStore(leaderStoreID uint64) RegionCreateOption {
 		for _, p := range region.GetPeers() {
 			if !IsLearner(p) && p.GetStoreId() == leaderStoreID {
 				region.leader = p
+				return
 			}
 		}
 	}
