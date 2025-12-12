@@ -237,6 +237,8 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		if !targetLeader.AllowLeaderTransferIn() || c.conf.CheckLabelProperty(config.RejectLeader, targetLeader.GetLabels()) {
 			return nil
 		}
+	} else {
+		return nil
 	}
 
 	// Determine operator kind based on whether leader needs to change
