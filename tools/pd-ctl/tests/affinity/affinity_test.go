@@ -53,13 +53,22 @@ func TestAffinityCommands(t *testing.T) {
 	re.NoError(err)
 
 	// Pre-create groups so CLI commands can operate on them.
+	const tableGroup = "pd-test-table-group"
 	const tableID = uint64(1001)
 	const partitionID = uint64(3)
-	tableGroup := command.FormatGroupID(tableID, 0)
-	partitionGroup := command.FormatGroupID(tableID, partitionID)
+	tGroup, err := command.FormatGroupID("", tableID, 0)
+	re.NoError(err)
+	ptGroup, err := command.FormatGroupID("", tableID, partitionID)
+	re.NoError(err)
+	tgGroup, err := command.FormatGroupID(tableGroup, 0, 0)
+	re.NoError(err)
+	ptgGroup, err := command.FormatGroupID(tableGroup, 0, partitionID)
+	re.NoError(err)
 	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{
-		{GroupID: tableGroup},
-		{GroupID: partitionGroup},
+		{GroupID: tGroup},
+		{GroupID: ptGroup},
+		{GroupID: tgGroup},
+		{GroupID: ptgGroup},
 	}))
 
 	pdAddr := cluster.GetConfig().GetClientURL()
@@ -68,26 +77,54 @@ func TestAffinityCommands(t *testing.T) {
 	// show should return both groups with the expected IDs.
 	groups := make(map[string]*pd.AffinityGroupState)
 	tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "affinity", "show"}, &groups)
-	re.Contains(groups, tableGroup)
-	re.Contains(groups, partitionGroup)
+	re.Contains(groups, tGroup)
+	re.Contains(groups, ptGroup)
+	re.Contains(groups, tgGroup)
+	re.Contains(groups, ptgGroup)
 
-	// show table group
+	// show table affinity group
 	var state pd.AffinityGroupState
 	tests.MustExec(re, cmd, []string{
 		"-u", pdAddr, "config", "affinity", "show",
 		"--table-id", strconv.FormatUint(tableID, 10),
 	}, &state)
-	re.Equal(tableGroup, state.ID)
+	re.Equal(tGroup, state.ID)
 
-	// show partitioned table group
+	// show partitioned table affinity group
 	tests.MustExec(re, cmd, []string{
 		"-u", pdAddr, "config", "affinity", "show",
 		"--table-id", strconv.FormatUint(tableID, 10),
 		"--partition-id", strconv.FormatUint(partitionID, 10),
 	}, &state)
-	re.Equal(partitionGroup, state.ID)
+	re.Equal(ptGroup, state.ID)
 
-	// update peers for the partitioned table
+	// show tablegroup affinity group
+	cmd = ctl.GetRootCmd() // reset cmd to clean args
+	tests.MustExec(re, cmd, []string{
+		"-u", pdAddr, "config", "affinity", "show",
+		"--tablegroup", tableGroup,
+	}, &state)
+	re.Equal(tgGroup, state.ID)
+
+	// show partitioned tablegroup affinity group
+	tests.MustExec(re, cmd, []string{
+		"-u", pdAddr, "config", "affinity", "show",
+		"--tablegroup", tableGroup,
+		"--partition-id", strconv.FormatUint(partitionID, 10),
+	}, &state)
+	re.Equal(ptgGroup, state.ID)
+
+	// Specifying both --tablegroup and --table-id at the same time is not allowed
+	out := tests.MustExec(re, cmd, []string{
+		"-u", pdAddr, "config", "affinity", "show",
+		"--tablegroup", tableGroup,
+		"--table-id", strconv.FormatUint(tableID, 10),
+		"--partition-id", strconv.FormatUint(partitionID, 10),
+	}, nil)
+	re.Contains(out, "only one of --tablegroup or --table-id is required")
+
+	// update peers for the partitioned table affinity group
+	cmd = ctl.GetRootCmd() // reset cmd to clean args
 	tests.MustExec(re, cmd, []string{
 		"-u", pdAddr, "config", "affinity", "update",
 		"--table-id", strconv.FormatUint(tableID, 10),
@@ -95,21 +132,22 @@ func TestAffinityCommands(t *testing.T) {
 		"--leader", "1",
 		"--voters", "1,2",
 	}, &state)
+	re.Equal(ptGroup, state.ID)
 	re.Equal(uint64(1), state.LeaderStoreID)
 	re.ElementsMatch([]uint64{1, 2}, state.VoterStoreIDs)
 
-	// delete the normal table group
+	// delete the normal table affinity group
 	cmd = ctl.GetRootCmd() // reset cmd to clean args
-	out := tests.MustExec(re, cmd, []string{
+	out = tests.MustExec(re, cmd, []string{
 		"-u", pdAddr, "config", "affinity", "delete",
 		"--table-id", strconv.FormatUint(tableID, 10),
 	}, nil)
-	re.Contains(out, tableGroup)
+	re.Contains(out, tGroup)
 
-	// ensure only the partition group remains.
+	// ensure only the partitioned table affinity group remains.
 	groups = make(map[string]*pd.AffinityGroupState)
 	cmd = ctl.GetRootCmd() // reset cmd to clean args
 	tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "affinity", "show"}, &groups)
-	re.NotContains(groups, tableGroup)
-	re.Contains(groups, partitionGroup)
+	re.NotContains(groups, tGroup)
+	re.Contains(groups, ptGroup)
 }
