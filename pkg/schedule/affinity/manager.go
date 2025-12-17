@@ -363,6 +363,22 @@ func (m *Manager) InvalidCache(regionID uint64) {
 	m.deleteCacheLocked(regionID)
 }
 
+// InvalidCacheForMissingRegions invalidates the Region cache if regionSetInformer can no longer find the Region.
+func (m *Manager) InvalidCacheForMissingRegions(regionSetInformer core.RegionSetInformer, regions ...*core.RegionInfo) {
+	invalidRegionIDs := make([]uint64, 0, len(regions))
+	for _, region := range regions {
+		if region != nil && regionSetInformer.GetRegion(region.GetID()) == nil {
+			invalidRegionIDs = append(invalidRegionIDs, region.GetID())
+		}
+	}
+
+	m.Lock()
+	defer m.Unlock()
+	for _, regionID := range invalidRegionIDs {
+		m.deleteCacheLocked(regionID)
+	}
+}
+
 func (m *Manager) getCache(region *core.RegionInfo) (*regionCache, *GroupState) {
 	m.RLock()
 	defer m.RUnlock()
