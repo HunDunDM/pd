@@ -238,9 +238,18 @@ func TestRegionCountStaleCache(t *testing.T) {
 	_, err = manager.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
 	re.NoError(err)
 	region := generateRegionForTest(100, []uint64{1, 2, 3}, ranges[0])
-	_, isAffinity := manager.GetRegionAffinityGroupState(region)
+
+	// test noCache = true
+	_, isAffinity := manager.GetRegionAffinityGroupState(region, true)
 	re.True(isAffinity)
 	groupInfo := getGroupForTest(re, manager, "g")
+	re.Zero(groupInfo.AffinityRegionCount)
+	re.Empty(groupInfo.Regions)
+
+	// test noCache = false
+	_, isAffinity = manager.GetRegionAffinityGroupState(region)
+	re.True(isAffinity)
+	groupInfo = getGroupForTest(re, manager, "g")
 	re.Equal(1, groupInfo.AffinityRegionCount)
 	re.Len(groupInfo.Regions, 1)
 
