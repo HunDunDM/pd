@@ -244,15 +244,15 @@ func TestRegionCountStaleCache(t *testing.T) {
 	re.Equal(1, groupInfo.AffinityRegionCount)
 	re.Len(groupInfo.Regions, 1)
 
-	// test InvalidCacheForMissingRegions
+	// test InvalidCacheForMissingRegion
 	regionInfos := core.NewRegionsInfo()
 	regionInfos.PutRegion(region)
-	manager.InvalidCacheForMissingRegions(regionInfos, region)
+	manager.InvalidCacheForMissingRegion(regionInfos, region)
 	groupInfo = getGroupForTest(re, manager, "g")
 	re.Equal(1, groupInfo.AffinityRegionCount)
 	re.Len(groupInfo.Regions, 1)
 	regionInfos.RemoveRegion(region)
-	manager.InvalidCacheForMissingRegions(regionInfos, region)
+	manager.InvalidCacheForMissingRegion(regionInfos, region)
 	groupInfo = getGroupForTest(re, manager, "g")
 	re.Zero(groupInfo.AffinityRegionCount)
 	re.Empty(groupInfo.Regions)
