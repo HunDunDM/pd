@@ -200,15 +200,13 @@ func (f *SnapshotSenderFilter) Select(region *core.RegionInfo) *plan.Status {
 }
 
 type affinityFilter struct {
-	regionSetInformer core.RegionSetInformer
-	affinityManager   *affinity.Manager
+	affinityManager *affinity.Manager
 }
 
 // NewAffinityFilter creates a RegionFilter that filters all affinity regions.
 func NewAffinityFilter(cluster sche.SharedCluster) RegionFilter {
 	return &affinityFilter{
-		regionSetInformer: cluster,
-		affinityManager:   cluster.GetAffinityManager(),
+		affinityManager: cluster.GetAffinityManager(),
 	}
 }
 
@@ -216,11 +214,8 @@ func NewAffinityFilter(cluster sche.SharedCluster) RegionFilter {
 func (f *affinityFilter) Select(region *core.RegionInfo) *plan.Status {
 	if f.affinityManager != nil {
 		group, _ := f.affinityManager.GetRegionAffinityGroupState(region)
-		if group != nil {
-			f.affinityManager.InvalidCacheForMissingRegions(f.regionSetInformer, region)
-			if !group.RegularSchedulingAllowed {
-				return statusRegionAffinity
-			}
+		if group != nil && !group.RegularSchedulingAllowed {
+			return statusRegionAffinity
 		}
 	}
 	return statusOK
