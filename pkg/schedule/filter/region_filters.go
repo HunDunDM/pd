@@ -213,7 +213,7 @@ func NewAffinityFilter(cluster sche.SharedCluster) RegionFilter {
 // Select implements the RegionFilter interface.
 func (f *affinityFilter) Select(region *core.RegionInfo) *plan.Status {
 	if f.affinityManager != nil {
-		group, _ := f.affinityManager.GetRegionAffinityGroupState(region, true)
+		group, _ := f.affinityManager.GetRegionAffinityGroupState(region, true /* skipSaveCache */)
 		if group != nil && !group.RegularSchedulingAllowed {
 			return statusRegionAffinity
 		}

@@ -314,7 +314,7 @@ func (c *AffinityChecker) checkAffinityMergeTarget(region, adjacent *core.Region
 	}
 
 	// Check if adjacent region belongs to the same affinity group
-	adjacentGroup, isAffinity := c.affinityManager.GetRegionAffinityGroupState(adjacent, true)
+	adjacentGroup, isAffinity := c.affinityManager.GetRegionAffinityGroupState(adjacent, true /* skipSaveCache */)
 	if adjacentGroup == nil || adjacentGroup.ID != group.ID {
 		// Adjacent region is not in the same affinity group
 		affinityMergeCheckerAdjDifferentGroupCounter.Inc()
