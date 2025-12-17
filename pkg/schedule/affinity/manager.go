@@ -371,11 +371,12 @@ func (m *Manager) InvalidCacheForMissingRegions(regionSetInformer core.RegionSet
 			invalidRegionIDs = append(invalidRegionIDs, region.GetID())
 		}
 	}
-
-	m.Lock()
-	defer m.Unlock()
-	for _, regionID := range invalidRegionIDs {
-		m.deleteCacheLocked(regionID)
+	if len(invalidRegionIDs) > 0 {
+		m.Lock()
+		defer m.Unlock()
+		for _, regionID := range invalidRegionIDs {
+			m.deleteCacheLocked(regionID)
+		}
 	}
 }
 
