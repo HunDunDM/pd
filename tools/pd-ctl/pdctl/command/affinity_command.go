@@ -16,6 +16,7 @@ package command
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -23,6 +24,7 @@ import (
 
 	"github.com/pingcap/errors"
 
+	"github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 )
 
@@ -42,6 +44,7 @@ func NewAffinityCommand() *cobra.Command {
 		newAffinityShowCommand(),
 		newAffinityDeleteCommand(),
 		newAffinityUpdatePeersCommand(),
+		newAffinityRebalanceCommand(),
 	)
 	return cmd
 }
@@ -73,6 +76,15 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 	}
 	cmd.Flags().Uint64("leader", 0, "leader store ID")
 	cmd.Flags().String("voters", "", "comma separated voter store IDs, e.g. 1,2,3")
+	return cmd
+}
+
+func newAffinityRebalanceCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rebalance",
+		Short: "rebalance the leader and voters for all affinity groups",
+		Run:   affinityRebalanceCommandFunc,
+	}
 	return cmd
 }
 
@@ -151,6 +163,92 @@ func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) {
 		return
 	}
 	jsonPrint(cmd, state)
+}
+
+type storeStat struct {
+	ID          uint64
+	VoterCount  int
+	LeaderCount int
+}
+
+func affinityRebalanceCommandFunc(cmd *cobra.Command, _ []string) {
+	groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
+	if err != nil {
+		cmd.Printf("Failed to get affinity groups: %v\n", err)
+		return
+	}
+
+	storesInfo, err := PDCli.GetStores(cmd.Context())
+	if err != nil {
+		cmd.Printf("Failed to get stores: %v\n", err)
+		return
+	}
+	stores := storesInfo.Stores
+
+	if len(groups) == 0 {
+		cmd.Println("No affinity groups found")
+		return
+	}
+
+	for _, group := range groups {
+		if group.LeaderStoreID == 0 || len(group.VoterStoreIDs) == 0 {
+			cmd.Printf("Group %s is not affinity, please wait for auto affinity or fix the issue", group.ID)
+			return
+		}
+	}
+
+	storeStats := make([]*storeStat, len(stores))
+	for i, store := range stores {
+		storeStats[i] = &storeStat{ID: uint64(store.Store.ID)}
+	}
+
+	sortedGroups := make([]*http.AffinityGroupState, 0, len(groups))
+	for _, group := range groups {
+		sortedGroups = append(sortedGroups, group)
+	}
+	slices.SortFunc(sortedGroups, func(a, b *http.AffinityGroupState) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+
+	for _, group := range sortedGroups {
+		// Find the stores with the fewest voters
+		slices.SortFunc(storeStats, func(a, b *storeStat) int {
+			if a.VoterCount == b.VoterCount {
+				return int(a.ID - b.ID)
+			}
+			return a.VoterCount - b.VoterCount
+		})
+		voterCount := len(group.VoterStoreIDs)
+		voterStores := slices.Clone(storeStats[:voterCount])
+		// Find the store with the fewest leader
+		slices.SortFunc(voterStores, func(a, b *storeStat) int {
+			if a.LeaderCount == b.LeaderCount {
+				return int(a.ID - b.ID)
+			}
+			return a.LeaderCount - b.LeaderCount
+		})
+		leaderStore := voterStores[0]
+		// Update the statistics
+		for _, store := range voterStores {
+			store.VoterCount++
+		}
+		leaderStore.LeaderCount++
+		// Assign to the current Group.
+		voterStoreIDs := make([]uint64, len(voterStores))
+		voterStoreStrings := make([]string, len(voterStores))
+		for i, store := range voterStores {
+			voterStoreIDs[i] = store.ID
+			voterStoreStrings[i] = strconv.FormatUint(store.ID, 10)
+		}
+		if _, err = PDCli.UpdateAffinityGroupPeers(cmd.Context(), group.ID, leaderStore.ID, voterStoreIDs); err != nil {
+			cmd.Printf("Failed to update affinity group %s peers: %v\n", group.ID, err)
+			return
+		}
+		cmd.Printf("Successfully updated affinity group %s peers. leader: %d stores: %s\n",
+			group.ID,
+			leaderStore.ID,
+			strings.Join(voterStoreStrings, ","))
+	}
 }
 
 func getGroupID(cmd *cobra.Command) (string, error) {
