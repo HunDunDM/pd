@@ -16,6 +16,7 @@ package affinity_test
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -150,4 +151,54 @@ func TestAffinityCommands(t *testing.T) {
 	tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "affinity", "show"}, &groups)
 	re.NotContains(groups, tGroup)
 	re.Contains(groups, ptGroup)
+}
+
+func TestAffinityRebalanceCommand(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := pdTests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	cluster.WaitLeader()
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	manager, err := leaderServer.GetServer().GetAffinityManager()
+	re.NoError(err)
+
+	for id := uint64(1); id <= 6; id++ {
+		pdTests.MustPutStore(re, cluster, &metapb.Store{Id: id, State: metapb.StoreState_Up})
+	}
+	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{
+		{GroupID: "test1"},
+		{GroupID: "test2"},
+		{GroupID: "test3"},
+	}))
+	_, err = manager.UpdateAffinityGroupPeers("test1", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	_, err = manager.UpdateAffinityGroupPeers("test2", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	_, err = manager.UpdateAffinityGroupPeers("test3", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := ctl.GetRootCmd()
+	_ = tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "affinity", "rebalance"}, nil)
+
+	group := manager.GetAffinityGroupState("test1")
+	re.NotNil(group)
+	re.Equal(uint64(1), group.LeaderStoreID)
+	re.True(slices.Equal([]uint64{1, 2, 3}, group.VoterStoreIDs))
+
+	group = manager.GetAffinityGroupState("test2")
+	re.NotNil(group)
+	re.Equal(uint64(4), group.LeaderStoreID)
+	re.True(slices.Equal([]uint64{4, 5, 6}, group.VoterStoreIDs))
+
+	group = manager.GetAffinityGroupState("test3")
+	re.NotNil(group)
+	re.Equal(uint64(2), group.LeaderStoreID)
+	re.True(slices.Equal([]uint64{1, 2, 3}, group.VoterStoreIDs))
 }
