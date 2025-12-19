@@ -192,7 +192,7 @@ func affinityRebalanceCommandFunc(cmd *cobra.Command, _ []string) {
 
 	for _, group := range groups {
 		if group.LeaderStoreID == 0 || len(group.VoterStoreIDs) == 0 {
-			cmd.Printf("Group %s is not affinity, please wait for auto affinity or fix the issue", group.ID)
+			cmd.Printf("Group %s is not affinity, please wait for auto affinity or fix the issue\n", group.ID)
 			return
 		}
 	}
