@@ -35,6 +35,7 @@ func NewAffinityCommand() *cobra.Command {
 		PersistentPreRunE: requirePDClient,
 	}
 	cmd.PersistentFlags().Uint64("table-id", 0, "table ID for the affinity group")
+	cmd.PersistentFlags().String("tablegroup", "", "tablegroup name for the affinity group, takes precedence over table-id")
 	cmd.PersistentFlags().Uint64("partition-id", 0, "partition ID for partitioned tables")
 
 	cmd.AddCommand(
@@ -77,9 +78,10 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 
 func affinityShowCommandFunc(cmd *cobra.Command, _ []string) {
 	tableID, _ := cmd.Flags().GetUint64("table-id")
+	tableGroup, _ := cmd.Flags().GetString("tablegroup")
 
-	// If no table-id is provided, show all affinity groups
-	if tableID == 0 {
+	// If no table-id or tablegroup is provided, show all affinity groups
+	if tableID == 0 && tableGroup == "" {
 		groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
 		if err != nil {
 			cmd.Printf("Failed to get affinity groups: %v\n", err)
@@ -152,24 +154,35 @@ func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) {
 }
 
 func getGroupID(cmd *cobra.Command) (string, error) {
+	tableGroup, _ := cmd.Flags().GetString("tablegroup")
 	tableID, _ := cmd.Flags().GetUint64("table-id")
-	if tableID == 0 {
-		return "", errors.New("--table-id is required")
-	}
 	partitionID, _ := cmd.Flags().GetUint64("partition-id")
-	groupID := FormatGroupID(tableID, partitionID)
-	if err := affinity.ValidateGroupID(groupID); err != nil {
+	groupID, err := FormatGroupID(tableGroup, tableID, partitionID)
+	if err != nil {
+		return "", err
+	}
+	if err = affinity.ValidateGroupID(groupID); err != nil {
 		return "", err
 	}
 	return groupID, nil
 }
 
 // FormatGroupID builds the affinity group ID from table/partition IDs following TiDB convention.
-func FormatGroupID(tableID, partitionID uint64) string {
-	if partitionID > 0 {
-		return fmt.Sprintf("_tidb_pt_%d_p%d", tableID, partitionID)
+func FormatGroupID(tableGroup string, tableID, partitionID uint64) (string, error) {
+	switch {
+	case tableGroup != "" && tableID > 0:
+		return "", errors.New("only one of --tablegroup or --table-id is required")
+	case tableGroup != "" && partitionID > 0:
+		return fmt.Sprintf("_tidb_ptg_%s_p%d", tableGroup, partitionID), nil
+	case tableGroup != "" && partitionID == 0:
+		return fmt.Sprintf("_tidb_tg_%s", tableGroup), nil
+	case tableID > 0 && partitionID > 0:
+		return fmt.Sprintf("_tidb_pt_%d_p%d", tableID, partitionID), nil
+	case tableID > 0 && partitionID == 0:
+		return fmt.Sprintf("_tidb_t_%d", tableID), nil
+	default:
+		return "", errors.New("--tablegroup or --table-id is required")
 	}
-	return fmt.Sprintf("_tidb_t_%d", tableID)
 }
 
 func parseUint64List(input string) ([]uint64, error) {
