@@ -2409,16 +2409,18 @@ func storeIDsEq(re *require.Assertions, expectedStoreIDs []uint64, peers []*meta
 // cache mechanism works correctly.
 func TestAffinityMergeCheckWithOperatorController(t *testing.T) {
 	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(30)
-	tc := mockcluster.NewCluster(t.Context(), opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
 	tc.AddRegionStore(3, 100)
 
 	// Create affinity checker and set up callback
-	affinityChecker := newTestAffinityChecker(t.Context(), tc, opt)
+	affinityChecker := newTestAffinityChecker(ctx, tc, opt)
 
 	// Create THREE small adjacent regions
 	regions := make([]*core.RegionInfo, 3)
